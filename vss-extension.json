@@ -1,6 +1,6 @@
 {
   "manifestVersion": 1,
-  "id": "code-review-bot",
+  "id": "copilot-code-review-bot",
   "publisher": "RachitSinghal",
   "version": "2.0.0",
   "name": "AI Code Review (GitHub Copilot)",
