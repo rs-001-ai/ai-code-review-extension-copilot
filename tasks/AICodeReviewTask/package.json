@@ -1,0 +1,16 @@
+{
+  "name": "ai-code-review-task",
+  "version": "2.0.0",
+  "description": "AI Code Review Task for Azure DevOps",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "azure-pipelines-task-lib": "^4.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0"
+  }
+}
