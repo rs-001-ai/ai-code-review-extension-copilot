@@ -57,9 +57,198 @@ PROMPT_FILE = os.environ.get("INPUT_PROMPT_FILE", "")
 ADO_API_VERSION = "7.1"
 
 # ---------------------------------------------------------------------------
-# Default Review Prompt
+# Skill-Based Review System
 # ---------------------------------------------------------------------------
 
+# Path to skill files (relative to this script)
+SKILL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "code-review-skill")
+
+# Mapping of file extensions to language-specific skill files
+LANGUAGE_SKILL_MAP = {
+    # Python
+    ".py": "python.md",
+    ".pyw": "python.md",
+    ".pyx": "python.md",
+    # JavaScript/TypeScript
+    ".js": "javascript.md",
+    ".jsx": "javascript.md",
+    ".ts": "javascript.md",
+    ".tsx": "javascript.md",
+    ".mjs": "javascript.md",
+    ".cjs": "javascript.md",
+    # C#
+    ".cs": "csharp.md",
+    ".csx": "csharp.md",
+    # Java
+    ".java": "java.md",
+    ".kt": "java.md",
+    ".kts": "java.md",
+    # Rust
+    ".rs": "rust.md",
+    # Go
+    ".go": "go.md",
+    # C/C++
+    ".c": "cpp.md",
+    ".cpp": "cpp.md",
+    ".cc": "cpp.md",
+    ".cxx": "cpp.md",
+    ".h": "cpp.md",
+    ".hpp": "cpp.md",
+    ".hxx": "cpp.md",
+}
+
+# Framework detection patterns
+FRAMEWORK_PATTERNS = {
+    "frontend.md": [
+        "react", "vue", "angular", "@angular", "svelte", "vite",
+        "next", "nuxt", "remix", ".jsx", ".tsx", ".vue", ".svelte"
+    ],
+    "backend.md": [
+        "fastapi", "flask", "django", "express", "nest", "koa",
+        "spring", "quarkus", "asp.net", "webapi", "controller"
+    ],
+}
+
+# Cross-cutting concerns always loaded
+CROSS_CUTTING_SKILLS = ["security.md", "architecture.md", "performance.md"]
+
+
+def load_skill_file(filename: str) -> str:
+    """Load a skill file from the code-review-skill directory."""
+    # Check references subdirectory first
+    ref_path = os.path.join(SKILL_DIR, "references", filename)
+    if os.path.isfile(ref_path):
+        with open(ref_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    # Check root skill directory
+    root_path = os.path.join(SKILL_DIR, filename)
+    if os.path.isfile(root_path):
+        with open(root_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    log.warning(f"Skill file not found: {filename}")
+    return ""
+
+
+def detect_languages_from_diff(diff: str) -> set:
+    """Detect programming languages from file extensions in the diff."""
+    languages = set()
+
+    # Parse diff headers to find file paths
+    for line in diff.split("\n"):
+        if line.startswith("+++ b/") or line.startswith("--- a/"):
+            path = line[6:]  # Remove "+++ b/" or "--- a/"
+            if path and path != "/dev/null":
+                _, ext = os.path.splitext(path)
+                ext = ext.lower()
+                if ext in LANGUAGE_SKILL_MAP:
+                    languages.add(LANGUAGE_SKILL_MAP[ext])
+
+    return languages
+
+
+def detect_frameworks_from_diff(diff: str) -> set:
+    """Detect frameworks from content patterns in the diff."""
+    frameworks = set()
+    diff_lower = diff.lower()
+
+    for skill_file, patterns in FRAMEWORK_PATTERNS.items():
+        for pattern in patterns:
+            if pattern in diff_lower:
+                frameworks.add(skill_file)
+                break
+
+    return frameworks
+
+
+def build_skill_based_prompt(diff: str) -> str:
+    """
+    Build a comprehensive review prompt using skill files.
+    Dynamically loads relevant skills based on detected languages and frameworks.
+    """
+    prompt_parts = []
+
+    # 1. Load the main skill file (SKILL.md)
+    main_skill = load_skill_file("SKILL.md")
+    if main_skill:
+        prompt_parts.append(main_skill)
+
+    # 2. Detect and load language-specific skills
+    detected_languages = detect_languages_from_diff(diff)
+    log.info(f"Detected language skills: {detected_languages or 'none'}")
+
+    for lang_skill in detected_languages:
+        content = load_skill_file(lang_skill)
+        if content:
+            prompt_parts.append(f"\n\n---\n\n## Language Reference: {lang_skill}\n\n{content}")
+
+    # 3. Detect and load framework-specific skills
+    detected_frameworks = detect_frameworks_from_diff(diff)
+    log.info(f"Detected framework skills: {detected_frameworks or 'none'}")
+
+    for fw_skill in detected_frameworks:
+        content = load_skill_file(fw_skill)
+        if content:
+            prompt_parts.append(f"\n\n---\n\n## Framework Reference: {fw_skill}\n\n{content}")
+
+    # 4. Always load cross-cutting concerns (security, architecture, performance)
+    for cc_skill in CROSS_CUTTING_SKILLS:
+        content = load_skill_file(cc_skill)
+        if content:
+            # Truncate to keep within context limits (each ~10KB)
+            if len(content) > 12000:
+                content = content[:12000] + "\n\n[... truncated for context limits ...]"
+            prompt_parts.append(f"\n\n---\n\n## {cc_skill.replace('.md', '').title()} Reference\n\n{content}")
+
+    # 5. Add JSON output format instructions
+    prompt_parts.append("""
+
+---
+
+## Required Output Format
+
+After reviewing the code, respond in this EXACT JSON format:
+
+```json
+{
+  "summary": "Brief overall assessment of the PR",
+  "verdict": "APPROVE|REQUEST_CHANGES|COMMENT",
+  "issues": [
+    {
+      "severity": "critical|high|medium|low",
+      "category": "security|performance|logic|best-practice|quality|error-handling",
+      "file": "path/to/file.ext",
+      "line": 42,
+      "title": "Short issue title",
+      "description": "Detailed explanation of the problem",
+      "suggestion": "Recommended fix or improvement with code example"
+    }
+  ]
+}
+```
+
+If no issues are found, return:
+```json
+{
+  "summary": "PR looks good. No significant issues found.",
+  "verdict": "APPROVE",
+  "issues": []
+}
+```
+
+IMPORTANT:
+- Only report real, actionable issues from the CHANGED lines (+ lines in diff)
+- Do NOT flag issues in unchanged context lines
+- Be specific about file paths and line numbers
+- Provide concrete fix suggestions with code examples
+- Respond ONLY with valid JSON, no additional text before or after
+""")
+
+    return "\n".join(prompt_parts)
+
+
+# Fallback prompt if skill files are not available
 DEFAULT_REVIEW_PROMPT = """You are an expert code reviewer. Analyze the following code changes from a Pull Request and provide a thorough review.
 
 Focus on these areas:
@@ -383,17 +572,34 @@ def post_pr_comment(content: str, comment_type: int = 1):
 # ---------------------------------------------------------------------------
 
 def build_review_prompt(diff: str) -> str:
-    """Build the full review prompt including the diff."""
-    # Use custom prompt if provided
+    """
+    Build the full review prompt including the diff.
+
+    Priority order:
+    1. Custom prompt (from task input)
+    2. Prompt file (from task input)
+    3. Skill-based prompt (dynamically loaded based on detected languages/frameworks)
+    4. Default fallback prompt
+    """
+    # Use custom prompt if provided (highest priority)
     if CUSTOM_PROMPT:
+        log.info("Using custom prompt from task input")
         prompt = CUSTOM_PROMPT
     elif PROMPT_FILE and os.path.isfile(PROMPT_FILE):
-        with open(PROMPT_FILE, "r") as f:
+        log.info(f"Using prompt from file: {PROMPT_FILE}")
+        with open(PROMPT_FILE, "r", encoding="utf-8") as f:
             prompt = f.read()
     else:
-        prompt = DEFAULT_REVIEW_PROMPT
+        # Use skill-based prompt system
+        if os.path.isdir(SKILL_DIR):
+            log.info("Building skill-based review prompt...")
+            prompt = build_skill_based_prompt(diff)
+            log.info(f"Skill-based prompt built ({len(prompt)} chars)")
+        else:
+            log.warning(f"Skill directory not found at {SKILL_DIR}, using default prompt")
+            prompt = DEFAULT_REVIEW_PROMPT
 
-    return f"{prompt}\n\n---\n\nHere are the code changes to review:\n\n```diff\n{diff}\n```"
+    return f"{prompt}\n\n---\n\n## Code Changes to Review\n\n```diff\n{diff}\n```"
 
 
 def run_copilot_review(diff: str, cli_command: str) -> str:
@@ -657,7 +863,7 @@ def format_review_comment(review: dict) -> str:
     model_info = COPILOT_MODEL or "default"
     lines.append("---")
     lines.append(f"*Reviewed by GitHub Copilot (model: {model_info}) | "
-                 f"[AI Code Review Extension](https://github.com/rs-001-ai/ai-code-review-extension)*")
+                 f"[AI Code Review Extension](https://github.com/rs-001-ai/ai-code-review-extension-copilot)*")
 
     return "\n".join(lines)
 

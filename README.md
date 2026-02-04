@@ -259,8 +259,8 @@ If using `System.AccessToken`, the Build Service identity needs "Contribute to p
 
 ## Support
 
-- [GitHub Issues](https://github.com/rs-001-ai/ai-code-review-extension/issues)
-- [Documentation](https://github.com/rs-001-ai/ai-code-review-extension)
+- [GitHub Issues](https://github.com/rs-001-ai/ai-code-review-extension-copilot/issues)
+- [Documentation](https://github.com/rs-001-ai/ai-code-review-extension-copilot)
 
 ## License
 

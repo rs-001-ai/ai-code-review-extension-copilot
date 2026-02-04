@@ -4,7 +4,7 @@
   "name": "AICodeReview",
   "friendlyName": "AI Code Review (GitHub Copilot)",
   "description": "Automatically review Pull Requests using GitHub Copilot. Analyzes code for security, performance, and best practices.",
-  "helpMarkDown": "[Learn More](https://github.com/rs-001-ai/ai-code-review-extension)",
+  "helpMarkDown": "[Learn More](https://github.com/rs-001-ai/ai-code-review-extension-copilot)",
   "category": "Utility",
   "visibility": ["Build", "Release"],
   "author": "Rachit Singhal",
