@@ -1,0 +1,27 @@
+{
+  "name": "ai-code-review-extension",
+  "version": "2.0.0",
+  "description": "AI-powered code review for Azure DevOps Pull Requests using GitHub Copilot",
+  "main": "tasks/AICodeReviewTask/index.js",
+  "scripts": {
+    "build": "tsc -p tasks/AICodeReviewTask/tsconfig.json",
+    "package": "tfx extension create --manifest-globs vss-extension.json",
+    "build-and-package": "npm run build && npm run package"
+  },
+  "dependencies": {
+    "azure-pipelines-task-lib": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  },
+  "keywords": [
+    "azure-devops",
+    "code-review",
+    "github-copilot",
+    "ai",
+    "pull-request"
+  ],
+  "author": "Rachit Singhal",
+  "license": "MIT"
+}

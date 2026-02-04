@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+*.js
+!tasks/AICodeReviewTask/index.js
+*.js.map
+*.d.ts
+
+# Package files
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+*.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+venv/
+.venv/
+
+# Logs
+*.log
+npm-debug.log*

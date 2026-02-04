@@ -1,0 +1,59 @@
+{
+  "manifestVersion": 1,
+  "id": "code-review-bot",
+  "publisher": "RachitSinghal",
+  "version": "2.0.0",
+  "name": "AI Code Review (GitHub Copilot)",
+  "description": "Automatically review Pull Requests using GitHub Copilot. Analyzes code for security vulnerabilities, performance issues, and best practices across 20+ languages.",
+  "public": true,
+  "categories": ["Azure Pipelines"],
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "icons": {
+    "default": "images/icon.png"
+  },
+  "content": {
+    "details": {
+      "path": "README.md"
+    }
+  },
+  "tags": [
+    "code review",
+    "ai",
+    "github copilot",
+    "pull request",
+    "security",
+    "devops",
+    "automation"
+  ],
+  "links": {
+    "repository": {
+      "uri": "https://github.com/rs-001-ai/ai-code-review-extension"
+    },
+    "issues": {
+      "uri": "https://github.com/rs-001-ai/ai-code-review-extension/issues"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "uri": "https://github.com/rs-001-ai/ai-code-review-extension"
+  },
+  "contributions": [
+    {
+      "id": "AICodeReview",
+      "type": "ms.vss-distributed-task.task",
+      "targets": ["ms.vss-distributed-task.tasks"],
+      "properties": {
+        "name": "tasks/AICodeReviewTask"
+      }
+    }
+  ],
+  "files": [
+    {
+      "path": "tasks/AICodeReviewTask"
+    }
+  ]
+}

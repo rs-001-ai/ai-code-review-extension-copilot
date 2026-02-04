@@ -1,0 +1,109 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Microsoft/azure-pipelines-task-lib/master/tasks.schema.json",
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "AICodeReview",
+  "friendlyName": "AI Code Review (GitHub Copilot)",
+  "description": "Automatically review Pull Requests using GitHub Copilot. Analyzes code for security, performance, and best practices.",
+  "helpMarkDown": "[Learn More](https://github.com/rs-001-ai/ai-code-review-extension)",
+  "category": "Utility",
+  "visibility": ["Build", "Release"],
+  "author": "Rachit Singhal",
+  "version": {
+    "Major": 2,
+    "Minor": 0,
+    "Patch": 0
+  },
+  "instanceNameFormat": "AI Code Review (Copilot)",
+  "inputs": [
+    {
+      "name": "githubPat",
+      "type": "string",
+      "label": "GitHub Personal Access Token",
+      "required": true,
+      "helpMarkDown": "GitHub PAT with Copilot access permissions. Generate a fine-grained token at https://github.com/settings/tokens with 'Copilot Requests' permission."
+    },
+    {
+      "name": "adoPat",
+      "type": "string",
+      "label": "Azure DevOps PAT",
+      "required": false,
+      "helpMarkDown": "Azure DevOps PAT for API access. Leave empty to use System.AccessToken (recommended). Required for Azure DevOps Server (on-prem)."
+    },
+    {
+      "name": "copilotModel",
+      "type": "pickList",
+      "label": "Copilot Model",
+      "required": false,
+      "defaultValue": "",
+      "helpMarkDown": "AI model for review. Leave empty for default (claude-sonnet-4.5). Models available depend on your Copilot subscription.",
+      "options": {
+        "": "Default (claude-sonnet-4.5)",
+        "claude-sonnet-4.5": "Claude Sonnet 4.5",
+        "claude-haiku-4.5": "Claude Haiku 4.5 (faster)",
+        "claude-opus-4.5": "Claude Opus 4.5 (most capable)",
+        "claude-sonnet-4": "Claude Sonnet 4",
+        "gpt-5.1-codex": "GPT-5.1 Codex",
+        "gpt-5.1-codex-mini": "GPT-5.1 Codex Mini (faster)",
+        "gpt-5.1": "GPT-5.1",
+        "gpt-5": "GPT-5",
+        "gpt-4.1": "GPT-4.1",
+        "gemini-3-pro-preview": "Gemini 3 Pro Preview"
+      }
+    },
+    {
+      "name": "maxFiles",
+      "type": "string",
+      "label": "Max Files to Review",
+      "required": false,
+      "defaultValue": "50",
+      "helpMarkDown": "Maximum number of files to include in the review. Files beyond this limit are skipped."
+    },
+    {
+      "name": "maxLinesPerFile",
+      "type": "string",
+      "label": "Max Lines per File",
+      "required": false,
+      "defaultValue": "1000",
+      "helpMarkDown": "Files with more lines than this are truncated. Helps stay within model context limits."
+    },
+    {
+      "name": "customPrompt",
+      "type": "multiLine",
+      "label": "Custom Review Prompt",
+      "required": false,
+      "helpMarkDown": "Override the default review prompt with custom instructions. Avoid double quotes (\"). Supports markdown formatting.",
+      "properties": {
+        "rows": "8",
+        "resizable": "true"
+      }
+    },
+    {
+      "name": "promptFile",
+      "type": "filePath",
+      "label": "Prompt File Path",
+      "required": false,
+      "helpMarkDown": "Path to a .txt file containing custom review instructions. Overridden by 'Custom Review Prompt' if both are set."
+    },
+    {
+      "name": "debug",
+      "type": "boolean",
+      "label": "Enable Debug Logging",
+      "required": false,
+      "defaultValue": "false",
+      "helpMarkDown": "Enable verbose debug output in the pipeline logs."
+    },
+    {
+      "name": "continueOnError",
+      "type": "boolean",
+      "label": "Continue on Error",
+      "required": false,
+      "defaultValue": "true",
+      "helpMarkDown": "If true, the pipeline will not fail if the review encounters an error. A warning comment will be posted instead."
+    }
+  ],
+  "execution": {
+    "Node16": {
+      "target": "index.js"
+    }
+  }
+}
