@@ -1,13 +1,11 @@
 # AI Code Review for Azure DevOps (Powered by GitHub Copilot)
 
-Automatically review Pull Requests using **GitHub Copilot** models. Get instant feedback on security vulnerabilities, performance issues, and best practices — no OpenAI API key required.
-
-> **v2.0 Migration:** This version replaces OpenAI API with GitHub Copilot. If you're upgrading from v1.x, see the [Migration Guide](#migrating-from-v1-openai) below.
+Automatically review Pull Requests using **GitHub Models API**. Get instant feedback on security vulnerabilities, performance issues, and best practices.
 
 ## Features
 
-- **GitHub Copilot Powered** — Uses your existing Copilot subscription, no separate API costs
-- **Multi-Model Support** — Choose from Claude Sonnet 4.5, GPT-5.1, Gemini 3 Pro, and more
+- **GitHub Models API** — Uses Claude 4.5, GPT-5.2, Gemini, Llama via your GitHub account
+- **Multi-Model Support** — Choose from Claude 4.5 Sonnet/Opus, GPT-5.2 Codex, Gemini 2.5, Llama 4
 - **Automated PR Reviews** — Runs automatically on every Pull Request
 - **Multi-Language Support** — Python, JavaScript/TypeScript, C#, Java, Go, Rust, C++, and more
 - **Framework-Aware** — React, Vue, Angular, FastAPI, Flask, Express, Spring, ASP.NET
@@ -20,7 +18,7 @@ Automatically review Pull Requests using **GitHub Copilot** models. Get instant 
 
 ### 1. Install the Extension
 
-Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=RachitSinghal.code-review-bot).
+Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=RachitSinghal.copilot-code-review-bot).
 
 ### 2. Create a GitHub PAT
 
@@ -65,7 +63,7 @@ In your pipeline settings, ensure **"Allow scripts to access the OAuth token"** 
 |-------|----------|---------|-------------|
 | `githubPat` | Yes | - | GitHub PAT with Copilot access |
 | `adoPat` | No | System.AccessToken | Azure DevOps PAT (for on-prem) |
-| `copilotModel` | No | `claude-sonnet-4.5` | AI model for review |
+| `copilotModel` | No | `claude-4.5-sonnet` | AI model for review |
 | `maxFiles` | No | `50` | Max files to review per PR |
 | `maxLinesPerFile` | No | `1000` | Truncate files larger than this |
 | `customPrompt` | No | - | Custom review instructions |
@@ -77,13 +75,14 @@ In your pipeline settings, ensure **"Allow scripts to access the OAuth token"** 
 
 | Model | Speed | Quality | Notes |
 |-------|-------|---------|-------|
-| `claude-sonnet-4.5` | Fast | High | Default — best balance |
-| `claude-haiku-4.5` | Fastest | Good | Best for large PRs |
-| `claude-opus-4.5` | Slower | Highest | Most thorough reviews |
-| `gpt-5.1-codex` | Fast | High | OpenAI's coding model |
-| `gpt-5.1-codex-mini` | Fastest | Good | Lighter, faster |
-| `gpt-4.1` | Fast | High | Proven, reliable |
-| `gemini-3-pro-preview` | Fast | High | Google's latest |
+| `claude-4.5-sonnet` | Fast | High | Default — best balance for code review |
+| `claude-4.5-haiku` | Fastest | Good | Best for large PRs |
+| `claude-4.5-opus` | Slower | Highest | Most thorough reviews |
+| `gpt-5.2-codex` | Fast | High | OpenAI's best for code |
+| `gpt-5.2` | Fast | High | OpenAI's flagship |
+| `gpt-5.2-mini` | Fastest | Good | Lighter, faster |
+| `gemini-2.5-pro` | Fast | High | Google's latest |
+| `llama-4-70b` | Fast | High | Meta's latest |
 
 ## Custom Review Prompts
 
@@ -93,7 +92,7 @@ In your pipeline settings, ensure **"Allow scripts to access the OAuth token"** 
 - task: AICodeReview@2
   inputs:
     githubPat: $(GITHUB_PAT)
-    copilotModel: 'claude-sonnet-4.5'
+    copilotModel: 'gpt-4o'
     customPrompt: |
       Review this code focusing only on:
       - Security vulnerabilities (OWASP Top 10)
@@ -163,41 +162,6 @@ Overall Assessment: CHANGES REQUESTED
   - **Suggestion**: Use async overloads with await for I/O operations
 ```
 
-## Migrating from v1 (OpenAI)
-
-### What Changed
-
-| v1 (OpenAI) | v2 (GitHub Copilot) |
-|-------------|-------------------|
-| `openaiApiKey` | `githubPat` |
-| `openaiModel: 'gpt-5.2-codex'` | `copilotModel: 'claude-sonnet-4.5'` |
-| OpenAI API costs | Included with Copilot subscription |
-| Direct API calls | Copilot CLI / GitHub Models API |
-
-### Migration Steps
-
-1. Remove `OPENAI_API_KEY` from your pipeline variables
-2. Add `GITHUB_PAT` (GitHub PAT with Copilot Requests permission)
-3. Update your pipeline YAML:
-
-```yaml
-# BEFORE (v1)
-- task: AICodeReview@1
-  inputs:
-    openaiApiKey: $(OPENAI_API_KEY)
-    openaiModel: 'gpt-5.2-codex'
-
-# AFTER (v2)
-- task: AICodeReview@2
-  inputs:
-    githubPat: $(GITHUB_PAT)
-    copilotModel: 'claude-sonnet-4.5'  # optional
-  env:
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-```
-
-4. Add `fetchDepth: 0` to your checkout step (recommended for better diffs)
-
 ## How It Works
 
 ```
@@ -241,12 +205,12 @@ Overall Assessment: CHANGES REQUESTED
 
 - Add `fetchDepth: 0` to the checkout step for complete git history
 - Check pipeline logs for Copilot CLI output
-- For very large PRs, try setting a lower `maxFiles` value or use `claude-haiku-4.5` for better handling of large context
+- For very large PRs, try setting a lower `maxFiles` value or use `claude-4.5-haiku` for better handling of large context
 
 ### Timeout errors
 
 - Large PRs may take longer. The default timeout is 10 minutes.
-- Consider using `claude-haiku-4.5` for faster reviews on large PRs
+- Consider using `claude-4.5-haiku` for faster reviews on large PRs
 - Break large PRs into smaller, focused changes
 
 ### Build Service permissions

@@ -703,14 +703,36 @@ def run_copilot_review(diff: str, cli_command: str) -> str:
 
 def run_copilot_via_gh_api(prompt: str, env: dict) -> str:
     """
-    Fallback: Use the GitHub Copilot Chat Completions API via `gh api`.
-    This uses the GitHub REST API endpoint for Copilot chat.
+    Fallback: Use the GitHub Models API for code review.
+    Uses the Azure-hosted GitHub Models inference endpoint.
     """
-    model = COPILOT_MODEL or "claude-sonnet-4.5"
+    # Supported GitHub Models API - Latest 2026 models
+    # See: https://github.com/marketplace/models
+    supported_models = {
+        # Claude 4.5 series (Anthropic - latest)
+        "claude-4.5-sonnet",
+        "claude-4.5-haiku",
+        "claude-4.5-opus",
+        # GPT 5.2 series (OpenAI - latest)
+        "gpt-5.2-codex",
+        "gpt-5.2",
+        "gpt-5.2-mini",
+        # Google Gemini
+        "gemini-2.5-pro",
+        # Meta Llama
+        "llama-4-70b",
+    }
 
-    payload = json.dumps({
+    # Default to Claude 4.5 Sonnet for best code review quality
+    requested_model = COPILOT_MODEL or "claude-4.5-sonnet"
+    model = requested_model if requested_model in supported_models else "claude-4.5-sonnet"
+
+    log.info(f"Using GitHub Models API with model: {model}")
+
+    # Use the new Response API format for latest models (2026)
+    payload = {
         "model": model,
-        "messages": [
+        "input": [
             {
                 "role": "system",
                 "content": "You are an expert code reviewer. Respond only with valid JSON."
@@ -719,41 +741,77 @@ def run_copilot_via_gh_api(prompt: str, env: dict) -> str:
                 "role": "user",
                 "content": prompt
             }
-        ]
-    })
+        ],
+        "parameters": {
+            "temperature": 0.3,
+            "max_output_tokens": 8192
+        }
+    }
 
-    # Write payload to temp file to avoid argument length limits
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, prefix="copilot_payload_"
-    ) as tmp:
-        tmp.write(payload)
-        payload_file = tmp.name
+    # GitHub Models API endpoint - Response API (latest)
+    api_url = "https://models.github.com/inference/chat/responses"
+
+    headers = {
+        "Authorization": f"Bearer {env.get('GH_TOKEN', '')}",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2024-12-01",
+    }
 
     try:
-        result = subprocess.run(
-            ["gh", "api",
-             "--method", "POST",
-             "-H", "Accept: application/json",
-             "models/chat/completions",
-             "--input", payload_file],
-            capture_output=True, text=True, timeout=600, env=env
+        req = request.Request(
+            api_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST"
         )
 
-        if result.returncode != 0:
-            log.error(f"gh api fallback failed: {result.stderr}")
-            raise RuntimeError(f"All Copilot CLI methods failed. stderr: {result.stderr}")
+        log.info(f"Calling GitHub Models Response API...")
+        with request.urlopen(req, timeout=300) as resp:
+            response = json.loads(resp.read().decode("utf-8"))
 
-        response = json.loads(result.stdout)
-        choices = response.get("choices", [])
-        if choices:
-            return choices[0].get("message", {}).get("content", "")
-        return result.stdout
+            # Handle Response API format
+            output = response.get("output", [])
+            if output:
+                content = output[0].get("content", "")
+                log.info(f"GitHub Models API response received ({len(content)} chars)")
+                return content
 
-    finally:
+            # Fallback to legacy completions format
+            choices = response.get("choices", [])
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+                log.info(f"GitHub Models API response received ({len(content)} chars)")
+                return content
+
+            return json.dumps(response)
+
+    except error.HTTPError as e:
+        error_body = e.read().decode("utf-8") if e.readable() else "No response body"
+        log.error(f"GitHub Models API error {e.code}: {error_body}")
+
+        # Try alternative: use gh copilot explain as last resort
+        log.info("Trying gh copilot explain as last resort...")
         try:
-            os.unlink(payload_file)
-        except OSError:
-            pass
+            # Truncate prompt for CLI if extremely large (shell argument limits)
+            max_prompt_size = 100000  # 100KB limit for CLI
+            if len(prompt) > max_prompt_size:
+                log.warning(f"Prompt truncated from {len(prompt)} to {max_prompt_size} chars for CLI fallback")
+                short_prompt = prompt[:max_prompt_size]
+            else:
+                short_prompt = prompt
+            result = subprocess.run(
+                ["gh", "copilot", "explain", short_prompt],
+                capture_output=True, text=True, timeout=300, env=env
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception as explain_err:
+            log.error(f"gh copilot explain also failed: {explain_err}")
+
+        raise RuntimeError(f"All Copilot CLI methods failed. stderr: {error_body}")
+    except Exception as e:
+        log.error(f"GitHub Models API request failed: {e}")
+        raise RuntimeError(f"All Copilot CLI methods failed. stderr: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
