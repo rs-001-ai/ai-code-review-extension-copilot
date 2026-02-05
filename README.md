@@ -4,8 +4,8 @@ Automatically review Pull Requests using **GitHub Models API**. Get instant feed
 
 ## Features
 
-- **GitHub Models API** — Uses Claude 4.5, GPT-5.2, Gemini, Llama via your GitHub account
-- **Multi-Model Support** — Choose from Claude 4.5 Sonnet/Opus, GPT-5.2 Codex, Gemini 2.5, Llama 4
+- **GitHub Models API** — Uses GPT-4o, Llama 3.1, Mistral models via your GitHub account
+- **Multi-Model Support** — Choose from GPT-4o, GPT-4o-mini, Llama 3.1, Mistral Large
 - **Automated PR Reviews** — Runs automatically on every Pull Request
 - **Multi-Language Support** — Python, JavaScript/TypeScript, C#, Java, Go, Rust, C++, and more
 - **Framework-Aware** — React, Vue, Angular, FastAPI, Flask, Express, Spring, ASP.NET
@@ -63,7 +63,7 @@ In your pipeline settings, ensure **"Allow scripts to access the OAuth token"** 
 |-------|----------|---------|-------------|
 | `githubPat` | Yes | - | GitHub PAT with Copilot access |
 | `adoPat` | No | System.AccessToken | Azure DevOps PAT (for on-prem) |
-| `copilotModel` | No | `claude-4.5-sonnet` | AI model for review |
+| `copilotModel` | No | `claude-sonnet-4.5` | AI model for review |
 | `maxFiles` | No | `50` | Max files to review per PR |
 | `maxLinesPerFile` | No | `1000` | Truncate files larger than this |
 | `customPrompt` | No | - | Custom review instructions |
@@ -75,14 +75,13 @@ In your pipeline settings, ensure **"Allow scripts to access the OAuth token"** 
 
 | Model | Speed | Quality | Notes |
 |-------|-------|---------|-------|
-| `claude-4.5-sonnet` | Fast | High | Default — best balance for code review |
-| `claude-4.5-haiku` | Fastest | Good | Best for large PRs |
-| `claude-4.5-opus` | Slower | Highest | Most thorough reviews |
-| `gpt-5.2-codex` | Fast | High | OpenAI's best for code |
-| `gpt-5.2` | Fast | High | OpenAI's flagship |
-| `gpt-5.2-mini` | Fastest | Good | Lighter, faster |
-| `gemini-2.5-pro` | Fast | High | Google's latest |
-| `llama-4-70b` | Fast | High | Meta's latest |
+| `claude-sonnet-4.5` | Fast | High | Default — best for code review |
+| `claude-opus-4.5` | Slower | Highest | Most thorough (3x cost) |
+| `claude-haiku-4.5` | Fastest | Good | Best for large PRs (0.33x cost) |
+| `gpt-5.1-codex` | Fast | High | OpenAI code specialist |
+| `gpt-5.1` | Fast | High | OpenAI flagship |
+| `gpt-5` | Fast | High | Previous generation |
+| `gemini-3-pro` | Fast | High | Google latest |
 
 ## Custom Review Prompts
 
@@ -205,12 +204,12 @@ Overall Assessment: CHANGES REQUESTED
 
 - Add `fetchDepth: 0` to the checkout step for complete git history
 - Check pipeline logs for Copilot CLI output
-- For very large PRs, try setting a lower `maxFiles` value or use `claude-4.5-haiku` for better handling of large context
+- For very large PRs, try setting a lower `maxFiles` value or use `claude-haiku-4.5` for better handling of large context
 
 ### Timeout errors
 
 - Large PRs may take longer. The default timeout is 10 minutes.
-- Consider using `claude-4.5-haiku` for faster reviews on large PRs
+- Consider using `claude-haiku-4.5` for faster reviews on large PRs
 - Break large PRs into smaller, focused changes
 
 ### Build Service permissions

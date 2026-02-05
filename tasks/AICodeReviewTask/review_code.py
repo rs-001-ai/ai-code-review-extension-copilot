@@ -573,13 +573,7 @@ def post_pr_comment(content: str, comment_type: int = 1):
 
 def build_review_prompt(diff: str) -> str:
     """
-    Build the full review prompt including the diff.
-
-    Priority order:
-    1. Custom prompt (from task input)
-    2. Prompt file (from task input)
-    3. Skill-based prompt (dynamically loaded based on detected languages/frameworks)
-    4. Default fallback prompt
+    Build a detailed review prompt for comprehensive code review.
     """
     # Use custom prompt if provided (highest priority)
     if CUSTOM_PROMPT:
@@ -590,109 +584,139 @@ def build_review_prompt(diff: str) -> str:
         with open(PROMPT_FILE, "r", encoding="utf-8") as f:
             prompt = f.read()
     else:
-        # Use skill-based prompt system
-        if os.path.isdir(SKILL_DIR):
-            log.info("Building skill-based review prompt...")
-            prompt = build_skill_based_prompt(diff)
-            log.info(f"Skill-based prompt built ({len(prompt)} chars)")
-        else:
-            log.warning(f"Skill directory not found at {SKILL_DIR}, using default prompt")
-            prompt = DEFAULT_REVIEW_PROMPT
+        # Use detailed review prompt
+        log.info("Using detailed review prompt")
+        prompt = DETAILED_REVIEW_PROMPT
 
-    return f"{prompt}\n\n---\n\n## Code Changes to Review\n\n```diff\n{diff}\n```"
+    return f"{prompt}\n\n## Code Changes to Review:\n\n```diff\n{diff}\n```"
 
 
-def run_copilot_review(diff: str, cli_command: str) -> str:
+# Detailed code review prompt matching OpenAI format
+DETAILED_REVIEW_PROMPT = """You are an expert code reviewer. Review this Pull Request diff thoroughly.
+
+## Review Format
+
+Respond in this EXACT JSON format:
+
+```json
+{
+  "pr_description": "Brief description of what this PR does",
+  "files_changed": [
+    {"file": "path/to/file.ext", "change_type": "Added|Modified|Deleted", "lines_changed": "+50/-10"}
+  ],
+  "overall_assessment": "APPROVE|REQUEST_CHANGES|COMMENT",
+  "summary": "2-3 sentence summary of the review",
+  "critical_issues": [
+    {
+      "title": "Issue title",
+      "file": "path/to/file.ext",
+      "line": 42,
+      "category": "security|performance|logic|best-practice",
+      "changed_code": "The actual code snippet from the diff that has the issue",
+      "problem": "Detailed explanation of what's wrong and why it's dangerous",
+      "impact": "What could happen if this isn't fixed",
+      "solution": "Detailed fix with code example showing the correct implementation"
+    }
+  ],
+  "high_priority": [],
+  "medium_priority": [],
+  "suggestions": [],
+  "positive_notes": ["List of good things about the code"]
+}
+```
+
+## Review Guidelines
+
+1. **Security** - Check for OWASP Top 10: SQL injection, XSS, hardcoded secrets, weak crypto, auth issues
+2. **Logic Errors** - Null reference bugs, off-by-one errors, race conditions, incorrect conditionals
+3. **Performance** - Inefficient algorithms, N+1 queries, unnecessary allocations, string concatenation in loops
+4. **Best Practices** - Exception handling, logging, naming conventions, SOLID principles
+
+## Important Instructions
+
+- Include the ACTUAL CODE SNIPPET from the diff in "changed_code" field
+- Provide WORKING CODE EXAMPLES in the "solution" field
+- Be specific about line numbers
+- Only flag issues in CHANGED lines (lines starting with +)
+- Include positive notes about good practices you observe
+- If code looks good, return empty arrays for issues and explain why in summary"""
+
+
+def run_copilot_review(diff: str, cli_command: str = None) -> str:
     """
-    Send the diff to GitHub Copilot CLI for review.
-
-    The Copilot CLI supports piped input and non-interactive mode.
-    We write the full prompt (instructions + diff) to a temp file and
-    pass it to the CLI.
+    Send the diff to GitHub Copilot for review.
+    Tries Copilot CLI first, falls back to GitHub Models API.
     """
     full_prompt = build_review_prompt(diff)
+    log.info(f"Review prompt built ({len(full_prompt)} chars)")
 
-    # Write prompt to temp file (avoids shell escaping issues with large diffs)
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", delete=False, prefix="copilot_review_"
-    ) as tmp:
-        tmp.write(full_prompt)
+    env = {
+        **os.environ,
+        "GH_TOKEN": GITHUB_PAT,
+        "GITHUB_TOKEN": GITHUB_PAT,
+    }
+
+    # Try to install and use Copilot CLI (better models, larger context)
+    try:
+        cli_path = install_copilot_cli()
+        if cli_path:
+            log.info(f"Using Copilot CLI: {cli_path}")
+            result = run_copilot_cli(full_prompt, cli_path, env)
+            if result:
+                return result
+            log.warning("Copilot CLI returned empty, trying API fallback...")
+    except Exception as e:
+        log.warning(f"Copilot CLI unavailable: {e}, using API fallback...")
+
+    # Fall back to GitHub Models API (limited models, smaller context)
+    log.info("Falling back to GitHub Models API...")
+    return call_github_models_api(full_prompt, env)
+
+
+def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
+    """Run review using GitHub Copilot CLI."""
+    # Write prompt to temp file
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+        tmp.write(prompt)
         prompt_file = tmp.name
 
-    log.info(f"Review prompt written to {prompt_file} ({len(full_prompt)} chars)")
-
     try:
-        env = {
-            **os.environ,
-            "GH_TOKEN": GITHUB_PAT,
-            "GITHUB_TOKEN": GITHUB_PAT,
-            "NO_COLOR": "1",  # Disable color codes in output
-        }
+        # Determine model to use
+        model = COPILOT_MODEL or "claude-sonnet-4.5"
+        log.info(f"Running Copilot CLI with model: {model}")
 
-        # Build the command based on which CLI variant is available
-        if cli_command == "gh-copilot":
-            # Using the gh copilot extension (deprecated but functional)
-            cmd = ["gh", "copilot", "suggest", "-t", "shell"]
-            # gh copilot doesn't support file-based prompts well,
-            # so we use a different approach: pipe via stdin
-            log.info("Using gh copilot extension for review...")
+        if cli_path == "gh-copilot":
+            # Using gh copilot extension
+            cmd = ["gh", "copilot", "suggest", "--target", "shell"]
+            # Read prompt and use stdin
             with open(prompt_file, "r") as f:
                 prompt_content = f.read()
-
             result = subprocess.run(
-                ["gh", "api", "copilot/chat/completions",
-                 "--method", "POST",
-                 "--input", "-"],
-                input=json.dumps({
-                    "model": COPILOT_MODEL or "claude-sonnet-4.5",
-                    "messages": [
-                        {"role": "system", "content": "You are an expert code reviewer."},
-                        {"role": "user", "content": prompt_content}
-                    ]
-                }),
-                capture_output=True, text=True, timeout=600, env=env
-            )
-        else:
-            # Using the standalone Copilot CLI
-            cmd = [cli_command]
-
-            # Build model flag if specified
-            model_args = []
-            if COPILOT_MODEL:
-                model_args = ["--model", COPILOT_MODEL]
-
-            log.info(f"Running Copilot CLI: {cli_command} "
-                     f"(model: {COPILOT_MODEL or 'default'})...")
-
-            # Read the prompt and pipe it to copilot CLI
-            with open(prompt_file, "r") as f:
-                prompt_content = f.read()
-
-            # Use copilot with -p (prompt) flag for non-interactive mode
-            result = subprocess.run(
-                [cli_command, "-p", prompt_content] + model_args,
+                cmd,
+                input=prompt_content,
                 capture_output=True,
                 text=True,
-                timeout=600,
-                env=env,
-                cwd=os.environ.get("BUILD_SOURCESDIRECTORY", os.getcwd())
+                timeout=300,
+                env=env
+            )
+        else:
+            # Using standalone copilot CLI
+            result = subprocess.run(
+                [cli_path, "-m", model, "-p", f"@{prompt_file}"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=env
             )
 
-        if result.returncode != 0:
-            log.error(f"Copilot CLI exited with code {result.returncode}")
-            log.error(f"stderr: {result.stderr}")
+        if result.returncode == 0 and result.stdout.strip():
+            log.info(f"Copilot CLI response received ({len(result.stdout)} chars)")
+            return result.stdout.strip()
 
-            # Fallback: try using the gh api approach for Copilot chat
-            log.info("Trying fallback via gh api copilot endpoint...")
-            return run_copilot_via_gh_api(full_prompt, env)
-
-        output = result.stdout.strip()
-        if not output:
-            log.warning("Copilot CLI returned empty output, trying stderr...")
-            output = result.stderr.strip()
-
-        log.info(f"Copilot review received ({len(output)} chars)")
-        return output
+        log.warning(f"Copilot CLI returned code {result.returncode}")
+        if result.stderr:
+            log.warning(f"stderr: {result.stderr[:500]}")
+        return None
 
     finally:
         try:
@@ -701,38 +725,41 @@ def run_copilot_review(diff: str, cli_command: str) -> str:
             pass
 
 
-def run_copilot_via_gh_api(prompt: str, env: dict) -> str:
+def call_github_models_api(prompt: str, env: dict) -> str:
     """
-    Fallback: Use the GitHub Models API for code review.
+    Call the GitHub Models API for code review.
     Uses the Azure-hosted GitHub Models inference endpoint.
     """
-    # Supported GitHub Models API - Latest 2026 models
+    # Supported GitHub Models API models
     # See: https://github.com/marketplace/models
     supported_models = {
-        # Claude 4.5 series (Anthropic - latest)
-        "claude-4.5-sonnet",
-        "claude-4.5-haiku",
-        "claude-4.5-opus",
-        # GPT 5.2 series (OpenAI - latest)
-        "gpt-5.2-codex",
-        "gpt-5.2",
-        "gpt-5.2-mini",
-        # Google Gemini
-        "gemini-2.5-pro",
-        # Meta Llama
-        "llama-4-70b",
+        # OpenAI
+        "gpt-4o",
+        "gpt-4o-mini",
+        # Meta Llama 3.1
+        "Meta-Llama-3.1-405B-Instruct",
+        "Meta-Llama-3.1-70B-Instruct",
+        "Meta-Llama-3.1-8B-Instruct",
+        # Meta Llama 3
+        "Meta-Llama-3-70B-Instruct",
+        "Meta-Llama-3-8B-Instruct",
+        # Mistral
+        "Mistral-large-2407",
+        "Mistral-Nemo",
+        # AI21
+        "AI21-Jamba-Instruct",
     }
 
-    # Default to Claude 4.5 Sonnet for best code review quality
-    requested_model = COPILOT_MODEL or "claude-4.5-sonnet"
-    model = requested_model if requested_model in supported_models else "claude-4.5-sonnet"
+    # Default to GPT-4o for best code review quality
+    requested_model = COPILOT_MODEL or "gpt-4o"
+    model = requested_model if requested_model in supported_models else "gpt-4o"
 
     log.info(f"Using GitHub Models API with model: {model}")
 
-    # Use the new Response API format for latest models (2026)
+    # Standard chat completions format (OpenAI-compatible)
     payload = {
         "model": model,
-        "input": [
+        "messages": [
             {
                 "role": "system",
                 "content": "You are an expert code reviewer. Respond only with valid JSON."
@@ -742,22 +769,26 @@ def run_copilot_via_gh_api(prompt: str, env: dict) -> str:
                 "content": prompt
             }
         ],
-        "parameters": {
-            "temperature": 0.3,
-            "max_output_tokens": 8192
-        }
+        "temperature": 0.3,
+        "max_tokens": 8192
     }
 
-    # GitHub Models API endpoint - Response API (latest)
-    api_url = "https://models.github.com/inference/chat/responses"
+    # GitHub Models API endpoint (the only working endpoint)
+    api_url = "https://models.inference.ai.azure.com/chat/completions"
+    gh_token = env.get('GH_TOKEN', '')
+
+    if not gh_token:
+        raise RuntimeError("GitHub token (GH_TOKEN) is not set")
 
     headers = {
-        "Authorization": f"Bearer {env.get('GH_TOKEN', '')}",
+        "Authorization": f"Bearer {gh_token}",
         "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2024-12-01",
     }
 
     try:
+        log.info(f"Calling GitHub Models API: {api_url}")
+        log.info(f"Using model: {model}")
+
         req = request.Request(
             api_url,
             data=json.dumps(payload).encode("utf-8"),
@@ -765,53 +796,27 @@ def run_copilot_via_gh_api(prompt: str, env: dict) -> str:
             method="POST"
         )
 
-        log.info(f"Calling GitHub Models Response API...")
         with request.urlopen(req, timeout=300) as resp:
             response = json.loads(resp.read().decode("utf-8"))
 
-            # Handle Response API format
-            output = response.get("output", [])
-            if output:
-                content = output[0].get("content", "")
-                log.info(f"GitHub Models API response received ({len(content)} chars)")
-                return content
-
-            # Fallback to legacy completions format
+            # Standard OpenAI completions format
             choices = response.get("choices", [])
             if choices:
                 content = choices[0].get("message", {}).get("content", "")
                 log.info(f"GitHub Models API response received ({len(content)} chars)")
                 return content
 
+            log.warning("No choices in API response")
             return json.dumps(response)
 
     except error.HTTPError as e:
         error_body = e.read().decode("utf-8") if e.readable() else "No response body"
         log.error(f"GitHub Models API error {e.code}: {error_body}")
+        raise RuntimeError(f"GitHub Models API failed with HTTP {e.code}: {error_body}")
 
-        # Try alternative: use gh copilot explain as last resort
-        log.info("Trying gh copilot explain as last resort...")
-        try:
-            # Truncate prompt for CLI if extremely large (shell argument limits)
-            max_prompt_size = 100000  # 100KB limit for CLI
-            if len(prompt) > max_prompt_size:
-                log.warning(f"Prompt truncated from {len(prompt)} to {max_prompt_size} chars for CLI fallback")
-                short_prompt = prompt[:max_prompt_size]
-            else:
-                short_prompt = prompt
-            result = subprocess.run(
-                ["gh", "copilot", "explain", short_prompt],
-                capture_output=True, text=True, timeout=300, env=env
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception as explain_err:
-            log.error(f"gh copilot explain also failed: {explain_err}")
-
-        raise RuntimeError(f"All Copilot CLI methods failed. stderr: {error_body}")
     except Exception as e:
         log.error(f"GitHub Models API request failed: {e}")
-        raise RuntimeError(f"All Copilot CLI methods failed. stderr: {str(e)}")
+        raise RuntimeError(f"GitHub Models API failed: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
@@ -820,45 +825,184 @@ def run_copilot_via_gh_api(prompt: str, env: dict) -> str:
 
 def parse_review_response(raw_response: str) -> dict:
     """Parse the JSON review response from Copilot."""
-    # Try to extract JSON from the response (it may be wrapped in markdown)
     text = raw_response.strip()
 
     # Remove markdown code fences if present
     if "```json" in text:
-        start = text.index("```json") + 7
-        end = text.index("```", start)
-        text = text[start:end].strip()
+        try:
+            start = text.index("```json") + 7
+            end = text.rindex("```")
+            text = text[start:end].strip()
+        except ValueError:
+            # No closing fence, take everything after ```json
+            start = text.index("```json") + 7
+            text = text[start:].strip()
     elif "```" in text:
-        start = text.index("```") + 3
-        end = text.index("```", start)
-        text = text[start:end].strip()
+        try:
+            start = text.index("```") + 3
+            end = text.rindex("```")
+            text = text[start:end].strip()
+        except ValueError:
+            start = text.index("```") + 3
+            text = text[start:].strip()
 
+    # Try to find JSON object boundaries
+    if text.startswith("{"):
+        # Find matching closing brace
+        brace_count = 0
+        json_end = 0
+        for i, char in enumerate(text):
+            if char == "{":
+                brace_count += 1
+            elif char == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+        if json_end > 0:
+            text = text[:json_end]
+
+    # Try to parse JSON
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        log.warning("Could not parse JSON from Copilot response, treating as raw text")
-        return {
-            "summary": "Review completed (raw response - could not parse structured output)",
-            "verdict": "COMMENT",
-            "issues": [],
-            "raw_response": raw_response,
+    except json.JSONDecodeError as e:
+        log.warning(f"JSON parse error: {e}")
+
+        # Try to fix common truncation issues
+        try:
+            # Add missing closing brackets
+            fixed = text.rstrip()
+            open_braces = fixed.count("{") - fixed.count("}")
+            open_brackets = fixed.count("[") - fixed.count("]")
+
+            # Remove incomplete last field if truncated
+            if fixed.endswith('"') or fixed.endswith(','):
+                last_complete = max(fixed.rfind('}'), fixed.rfind(']'))
+                if last_complete > 0:
+                    fixed = fixed[:last_complete + 1]
+
+            # Add missing closures
+            fixed += "]" * open_brackets + "}" * open_braces
+
+            result = json.loads(fixed)
+            log.info("Successfully parsed JSON after fixing truncation")
+            return result
+        except json.JSONDecodeError:
+            pass
+
+        # Final fallback: extract what we can
+        log.warning("Could not parse JSON, extracting fields manually")
+        return extract_review_fields(raw_response)
+
+
+def extract_review_fields(raw_response: str) -> dict:
+    """Extract review fields from raw response when JSON parsing fails."""
+    import re
+
+    result = {
+        "summary": "",
+        "overall_assessment": "COMMENT",
+        "critical_issues": [],
+        "high_priority": [],
+        "medium_priority": [],
+        "suggestions": [],
+        "positive_notes": [],
+        "raw_response": None
+    }
+
+    text = raw_response
+
+    # Try to extract summary
+    summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', text)
+    if summary_match:
+        result["summary"] = summary_match.group(1)
+
+    # Try to extract overall_assessment
+    assessment_match = re.search(r'"overall_assessment"\s*:\s*"([^"]+)"', text)
+    if assessment_match:
+        result["overall_assessment"] = assessment_match.group(1)
+
+    # Try to extract pr_description
+    pr_desc_match = re.search(r'"pr_description"\s*:\s*"([^"]+)"', text)
+    if pr_desc_match:
+        result["pr_description"] = pr_desc_match.group(1)
+
+    # Try to extract individual issues using regex
+    issue_pattern = r'\{\s*"title"\s*:\s*"([^"]+)"[^}]*"file"\s*:\s*"([^"]+)"[^}]*"line"\s*:\s*(\d+)[^}]*"category"\s*:\s*"([^"]+)"[^}]*"problem"\s*:\s*"([^"]+)"'
+
+    for match in re.finditer(issue_pattern, text, re.DOTALL):
+        issue = {
+            "title": match.group(1),
+            "file": match.group(2),
+            "line": int(match.group(3)),
+            "category": match.group(4),
+            "problem": match.group(5),
         }
+
+        # Try to extract solution for this issue
+        solution_match = re.search(r'"solution"\s*:\s*"([^"]{10,})"', text[match.end():match.end()+2000])
+        if solution_match:
+            issue["solution"] = solution_match.group(1)
+
+        # Try to extract changed_code
+        code_match = re.search(r'"changed_code"\s*:\s*"([^"]+)"', text[match.start():match.end()+500])
+        if code_match:
+            issue["changed_code"] = code_match.group(1)
+
+        # Categorize by severity based on category
+        if issue["category"] == "security":
+            result["critical_issues"].append(issue)
+        elif issue["category"] in ["logic", "performance"]:
+            result["high_priority"].append(issue)
+        elif issue["category"] == "best-practice":
+            result["suggestions"].append(issue)
+        else:
+            result["medium_priority"].append(issue)
+
+    # If we extracted issues, don't show raw response
+    if result["critical_issues"] or result["high_priority"] or result["medium_priority"] or result["suggestions"]:
+        log.info(f"Extracted {len(result['critical_issues'])} critical, {len(result['high_priority'])} high priority issues")
+    else:
+        # Show truncated raw response as fallback
+        result["raw_response"] = raw_response[:3000]
+
+    return result
 
 
 def format_review_comment(review: dict) -> str:
-    """Format the review into a markdown comment for Azure DevOps."""
+    """Format the review into a detailed markdown comment for Azure DevOps."""
     lines = []
 
     # Header
     lines.append("## 🤖 AI Code Review (Powered by GitHub Copilot)")
     lines.append("")
 
-    # Verdict badge
-    verdict = review.get("verdict", "COMMENT").upper()
+    # PR Description
+    pr_desc = review.get("pr_description", "")
+    if pr_desc:
+        lines.append(f"**PR/Change Description:** {pr_desc}")
+        lines.append("")
+
+    # Files Changed Table
+    files_changed = review.get("files_changed", [])
+    if files_changed:
+        lines.append("### Files Reviewed")
+        lines.append("")
+        lines.append("| File | Change Type | Lines Changed |")
+        lines.append("|------|-------------|---------------|")
+        for f in files_changed[:10]:  # Limit to 10 files
+            file_name = f.get("file", "Unknown")
+            change_type = f.get("change_type", "Modified")
+            lines_changed = f.get("lines_changed", "")
+            lines.append(f"| `{file_name}` | {change_type} | {lines_changed} |")
+        lines.append("")
+
+    # Overall Assessment
+    verdict = review.get("overall_assessment", review.get("verdict", "COMMENT")).upper()
     if verdict == "APPROVE":
         lines.append("**✅ Overall Assessment: LOOKS GOOD**")
-    elif verdict == "REQUEST_CHANGES":
-        lines.append("**⚠️ Overall Assessment: CHANGES REQUESTED**")
+    elif "REQUEST" in verdict or "CHANGES" in verdict:
+        lines.append("**⚠️ Overall Assessment: REQUEST CHANGES**")
     else:
         lines.append("**💬 Overall Assessment: COMMENTS**")
     lines.append("")
@@ -869,10 +1013,41 @@ def format_review_comment(review: dict) -> str:
         lines.append(f"> {summary}")
         lines.append("")
 
-    # Issues
+    # Critical Issues (new detailed format)
+    critical_issues = review.get("critical_issues", [])
+    if critical_issues:
+        lines.append("### 🔴 Critical Issues (Blocking)")
+        lines.append("")
+        for idx, issue in enumerate(critical_issues, 1):
+            lines.extend(format_detailed_issue(idx, issue))
+
+    # High Priority
+    high_priority = review.get("high_priority", [])
+    if high_priority:
+        lines.append("### 🟠 High Priority")
+        lines.append("")
+        for idx, issue in enumerate(high_priority, 1):
+            lines.extend(format_detailed_issue(idx, issue))
+
+    # Medium Priority
+    medium_priority = review.get("medium_priority", [])
+    if medium_priority:
+        lines.append("### 🟡 Medium Priority")
+        lines.append("")
+        for idx, issue in enumerate(medium_priority, 1):
+            lines.extend(format_detailed_issue(idx, issue))
+
+    # Suggestions
+    suggestions = review.get("suggestions", [])
+    if suggestions:
+        lines.append("### 🔵 Suggestions")
+        lines.append("")
+        for idx, issue in enumerate(suggestions, 1):
+            lines.extend(format_detailed_issue(idx, issue))
+
+    # Backward compatibility: handle old "issues" format
     issues = review.get("issues", [])
-    if issues:
-        # Group by severity
+    if issues and not (critical_issues or high_priority or medium_priority or suggestions):
         critical = [i for i in issues if i.get("severity") == "critical"]
         high = [i for i in issues if i.get("severity") == "high"]
         medium = [i for i in issues if i.get("severity") == "medium"]
@@ -882,31 +1057,38 @@ def format_review_comment(review: dict) -> str:
             lines.append("### 🔴 Critical Issues")
             lines.append("")
             for idx, issue in enumerate(critical, 1):
-                lines.extend(format_issue(idx, issue))
-            lines.append("")
+                lines.extend(format_detailed_issue(idx, issue))
 
         if high:
             lines.append("### 🟠 High Priority")
             lines.append("")
             for idx, issue in enumerate(high, 1):
-                lines.extend(format_issue(idx, issue))
-            lines.append("")
+                lines.extend(format_detailed_issue(idx, issue))
 
         if medium:
             lines.append("### 🟡 Medium Priority")
             lines.append("")
             for idx, issue in enumerate(medium, 1):
-                lines.extend(format_issue(idx, issue))
-            lines.append("")
+                lines.extend(format_detailed_issue(idx, issue))
 
         if low:
             lines.append("### 🔵 Suggestions")
             lines.append("")
             for idx, issue in enumerate(low, 1):
-                lines.extend(format_issue(idx, issue))
-            lines.append("")
+                lines.extend(format_detailed_issue(idx, issue))
 
-    elif not review.get("raw_response"):
+    # Positive Notes
+    positive_notes = review.get("positive_notes", [])
+    if positive_notes:
+        lines.append("### ✅ Positive Notes")
+        lines.append("")
+        for note in positive_notes:
+            lines.append(f"- {note}")
+        lines.append("")
+
+    # No issues found
+    has_issues = critical_issues or high_priority or medium_priority or suggestions or issues
+    if not has_issues and not review.get("raw_response"):
         lines.append("*No issues found. Great work!* 🎉")
         lines.append("")
 
@@ -914,47 +1096,67 @@ def format_review_comment(review: dict) -> str:
     if review.get("raw_response"):
         lines.append("### Review Details")
         lines.append("")
-        lines.append(review["raw_response"][:5000])  # Truncate very long responses
+        lines.append(review["raw_response"][:5000])
         lines.append("")
 
     # Footer
-    model_info = COPILOT_MODEL or "default"
+    model_info = COPILOT_MODEL or "claude-sonnet-4.5"
     lines.append("---")
-    lines.append(f"*Reviewed by GitHub Copilot (model: {model_info}) | "
-                 f"[AI Code Review Extension](https://github.com/rs-001-ai/ai-code-review-extension-copilot)*")
+    lines.append(f"*Model: {model_info} | Generated by [AI Code Review Extension](https://github.com/rs-001-ai/ai-code-review-extension-copilot)*")
 
     return "\n".join(lines)
 
 
-def format_issue(idx: int, issue: dict) -> list:
-    """Format a single issue into markdown lines."""
+def format_detailed_issue(idx: int, issue: dict) -> list:
+    """Format a single issue with code snippets into markdown lines."""
     lines = []
     title = issue.get("title", "Issue")
     file_path = issue.get("file", "")
     line_num = issue.get("line", "")
     category = issue.get("category", "")
 
+    # Issue header with location
     location = ""
     if file_path:
-        location = f" `{file_path}"
+        location = f"`{file_path}"
         if line_num:
             location += f":{line_num}"
         location += "`"
 
-    category_badge = ""
-    if category:
-        category_badge = f" [{category}]"
+    category_badge = f" [{category}]" if category else ""
+    lines.append(f"**{idx}. {title}**{category_badge}")
+    if location:
+        lines.append(f"**File:** {location}")
+    lines.append("")
 
-    lines.append(f"**{idx}. {title}**{category_badge}{location}")
+    # Changed code snippet
+    changed_code = issue.get("changed_code", "")
+    if changed_code:
+        lines.append("**Changed Code:**")
+        lines.append("```")
+        lines.append(changed_code[:500])  # Limit code length
+        lines.append("```")
+        lines.append("")
 
-    description = issue.get("description", "")
-    if description:
-        lines.append(f"  - **Problem**: {description}")
+    # Problem description
+    problem = issue.get("problem", issue.get("description", ""))
+    if problem:
+        lines.append(f"**Problem:** {problem}")
+        lines.append("")
 
-    suggestion = issue.get("suggestion", "")
-    if suggestion:
-        lines.append(f"  - **Suggestion**: {suggestion}")
+    # Impact
+    impact = issue.get("impact", "")
+    if impact:
+        lines.append(f"**Impact:** {impact}")
+        lines.append("")
 
+    # Solution with code example
+    solution = issue.get("solution", issue.get("suggestion", ""))
+    if solution:
+        lines.append(f"**Solution:** {solution}")
+        lines.append("")
+
+    lines.append("---")
     lines.append("")
     return lines
 
@@ -984,8 +1186,8 @@ def is_reviewable_file(path: str) -> bool:
 # Main Orchestration
 # ---------------------------------------------------------------------------
 
-def truncate_diff(diff: str, max_chars: int = 80000) -> str:
-    """Truncate diff to stay within Copilot's context window."""
+def truncate_diff(diff: str, max_chars: int = 60000) -> str:
+    """Truncate diff to stay within model context limits."""
     if len(diff) <= max_chars:
         return diff
 
@@ -997,8 +1199,7 @@ def truncate_diff(diff: str, max_chars: int = 80000) -> str:
         truncated = truncated[:last_newline]
 
     truncated += (
-        "\n\n... [DIFF TRUNCATED - PR is too large for full review. "
-        "Consider breaking into smaller PRs.] ..."
+        "\n\n... [DIFF TRUNCATED - PR too large. Review covers first portion only.] ..."
     )
     return truncated
 
@@ -1028,16 +1229,11 @@ def main():
     log.info(f"Project: {SYSTEM_TEAMPROJECT}")
     log.info(f"Repository: {BUILD_REPOSITORY_NAME}")
     log.info(f"PR ID: {SYSTEM_PULLREQUEST_PULLREQUESTID}")
-    log.info(f"Model: {COPILOT_MODEL or 'default (claude-sonnet-4.5)'}")
+    log.info(f"Model: {COPILOT_MODEL or 'default (gpt-4o)'}")
 
     try:
-        # Step 1: Install/verify Copilot CLI
-        log.info("Step 1: Verifying GitHub Copilot CLI...")
-        cli_command = install_copilot_cli()
-        log.info(f"Copilot CLI ready: {cli_command}")
-
-        # Step 2: Get the PR diff
-        log.info("Step 2: Fetching PR diff...")
+        # Step 1: Get the PR diff
+        log.info("Step 1: Fetching PR diff...")
 
         # Prefer git diff (faster, more complete) over API
         diff = get_diff_via_git()
@@ -1102,22 +1298,22 @@ def main():
         diff = truncate_diff(diff)
         log.info(f"Diff size: {len(diff)} chars")
 
-        # Step 3: Run Copilot review
-        log.info("Step 3: Running GitHub Copilot code review...")
-        raw_response = run_copilot_review(diff, cli_command)
+        # Step 2: Run GitHub Models API review
+        log.info("Step 2: Running GitHub Models API code review...")
+        raw_response = run_copilot_review(diff)
 
         if not raw_response:
-            raise RuntimeError("Copilot returned empty response")
+            raise RuntimeError("GitHub Models API returned empty response")
 
         log.debug(f"Raw response:\n{raw_response[:500]}...")
 
-        # Step 4: Parse and format the review
-        log.info("Step 4: Parsing review results...")
+        # Step 3: Parse and format the review
+        log.info("Step 3: Parsing review results...")
         review = parse_review_response(raw_response)
         comment = format_review_comment(review)
 
-        # Step 5: Post comment to PR
-        log.info("Step 5: Posting review to PR...")
+        # Step 4: Post comment to PR
+        log.info("Step 4: Posting review to PR...")
         post_pr_comment(comment)
 
         # Summary
@@ -1133,9 +1329,9 @@ def main():
             log.warning("continueOnError is enabled, pipeline will not fail")
             try:
                 post_pr_comment(
-                    "## 🤖 AI Code Review (Powered by GitHub Copilot)\n\n"
+                    "## 🤖 AI Code Review (Powered by GitHub Models API)\n\n"
                     f"⚠️ Review could not be completed: `{str(e)[:200]}`\n\n"
-                    "This may be due to Copilot CLI availability, authentication issues, "
+                    "This may be due to GitHub PAT permissions, API availability, "
                     "or the PR being too large. Check the pipeline logs for details."
                 )
             except Exception:
