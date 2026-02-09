@@ -685,12 +685,13 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
         model = COPILOT_MODEL or "claude-sonnet-4.5"
         log.info(f"Running Copilot CLI with model: {model}")
 
+        with open(prompt_file, "r") as f:
+            prompt_content = f.read()
+
         if cli_path == "gh-copilot":
-            # Using gh copilot extension
-            cmd = ["gh", "copilot", "suggest", "--target", "shell"]
-            # Read prompt and use stdin
-            with open(prompt_file, "r") as f:
-                prompt_content = f.read()
+            # Using gh copilot extension — use 'gh copilot explain' which
+            # accepts free-form text on stdin and returns a text response.
+            cmd = ["gh", "copilot", "explain", "--model", model]
             result = subprocess.run(
                 cmd,
                 input=prompt_content,
@@ -699,15 +700,41 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
                 timeout=300,
                 env=env
             )
+            # If --model flag isn't supported, retry without it
+            if result.returncode != 0 and "--model" in (result.stderr or ""):
+                log.warning("gh copilot --model not supported, retrying without model flag...")
+                cmd = ["gh", "copilot", "explain"]
+                result = subprocess.run(
+                    cmd,
+                    input=prompt_content,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    env=env
+                )
         else:
-            # Using standalone copilot CLI
+            # Using standalone copilot CLI — try known flag variants
+            # Try --model first (long form), fall back to piping via stdin
             result = subprocess.run(
-                [cli_path, "-m", model, "-p", f"@{prompt_file}"],
+                [cli_path, "--model", model],
+                input=prompt_content,
                 capture_output=True,
                 text=True,
                 timeout=300,
                 env=env
             )
+            # If --model flag isn't supported, try without model selection
+            if result.returncode != 0 and ("unknown option" in (result.stderr or "") or
+                                            "unrecognized" in (result.stderr or "")):
+                log.warning(f"Copilot CLI doesn't support --model, retrying via stdin...")
+                result = subprocess.run(
+                    [cli_path],
+                    input=prompt_content,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    env=env
+                )
 
         if result.returncode == 0 and result.stdout.strip():
             log.info(f"Copilot CLI response received ({len(result.stdout)} chars)")
@@ -736,6 +763,13 @@ def call_github_models_api(prompt: str, env: dict) -> str:
         # OpenAI
         "gpt-4o",
         "gpt-4o-mini",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
+        # Anthropic Claude
+        "claude-sonnet-4.5",
+        "claude-haiku-4.5",
+        "claude-opus-4.5",
         # Meta Llama 3.1
         "Meta-Llama-3.1-405B-Instruct",
         "Meta-Llama-3.1-70B-Instruct",
@@ -750,11 +784,39 @@ def call_github_models_api(prompt: str, env: dict) -> str:
         "AI21-Jamba-Instruct",
     }
 
-    # Default to GPT-4o for best code review quality
-    requested_model = COPILOT_MODEL or "gpt-4o"
-    model = requested_model if requested_model in supported_models else "gpt-4o"
+    # Model-specific token limits (input) for GitHub Models free tier
+    # These are conservative limits to avoid 413 errors
+    model_token_limits = {
+        "gpt-4o": 8000,
+        "gpt-4o-mini": 16000,
+        "gpt-4.1": 16000,
+        "gpt-4.1-mini": 16000,
+        "gpt-4.1-nano": 16000,
+        "claude-sonnet-4.5": 25000,
+        "claude-haiku-4.5": 25000,
+        "claude-opus-4.5": 25000,
+    }
+    default_token_limit = 8000
+
+    # Default to claude-sonnet-4.5 for best code review quality
+    requested_model = COPILOT_MODEL or "claude-sonnet-4.5"
+    model = requested_model if requested_model in supported_models else "claude-sonnet-4.5"
 
     log.info(f"Using GitHub Models API with model: {model}")
+
+    # Truncate prompt to stay within model's input token limit
+    # Rough estimate: 1 token ~ 4 characters
+    token_limit = model_token_limits.get(model, default_token_limit)
+    max_prompt_chars = int(token_limit * 3.5)  # conservative: 3.5 chars/token
+    if len(prompt) > max_prompt_chars:
+        log.warning(f"Prompt is {len(prompt)} chars, truncating to ~{max_prompt_chars} "
+                     f"chars for {model} ({token_limit} token limit)")
+        prompt = prompt[:max_prompt_chars]
+        # Cut at line boundary
+        last_nl = prompt.rfind("\n")
+        if last_nl > max_prompt_chars * 0.8:
+            prompt = prompt[:last_nl]
+        prompt += "\n\n... [PROMPT TRUNCATED due to API token limits] ..."
 
     # Standard chat completions format (OpenAI-compatible)
     payload = {
