@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "copilot-code-review-bot",
   "publisher": "RachitSinghal",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "name": "AI Code Review (GitHub Copilot)",
   "description": "Automatically review Pull Requests using GitHub Copilot. Analyzes code for security vulnerabilities, performance issues, and best practices across 20+ languages.",
   "public": true,
