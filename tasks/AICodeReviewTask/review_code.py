@@ -674,62 +674,40 @@ def run_copilot_review(diff: str, cli_command: str = None) -> str:
 
 
 def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
-    """Run review using GitHub Copilot CLI."""
-    # Write prompt to temp file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-        tmp.write(prompt)
-        prompt_file = tmp.name
-
+    """Run review using GitHub Copilot CLI in programmatic mode."""
     try:
-        # Determine model to use
         model = COPILOT_MODEL or "claude-sonnet-4.5"
         log.info(f"Running Copilot CLI with model: {model}")
 
-        with open(prompt_file, "r") as f:
-            prompt_content = f.read()
-
         if cli_path == "gh-copilot":
-            # Using gh copilot extension — use 'gh copilot explain' which
-            # accepts free-form text on stdin and returns a text response.
-            cmd = ["gh", "copilot", "explain", "--model", model]
+            # Using gh copilot extension
+            cmd = ["gh", "copilot", "explain", prompt]
             result = subprocess.run(
                 cmd,
-                input=prompt_content,
                 capture_output=True,
                 text=True,
                 timeout=300,
                 env=env
             )
-            # If --model flag isn't supported, retry without it
-            if result.returncode != 0 and "--model" in (result.stderr or ""):
-                log.warning("gh copilot --model not supported, retrying without model flag...")
-                cmd = ["gh", "copilot", "explain"]
-                result = subprocess.run(
-                    cmd,
-                    input=prompt_content,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                    env=env
-                )
         else:
-            # Using standalone copilot CLI — try known flag variants
-            # Try --model first (long form), fall back to piping via stdin
+            # Standalone copilot CLI: use -p flag for non-interactive mode
+            # Syntax: copilot --model <model> -p "prompt"
+            cmd = [cli_path, "--model", model, "-p", prompt]
+            log.info(f"Copilot CLI command: {cli_path} --model {model} -p <prompt>")
             result = subprocess.run(
-                [cli_path, "--model", model],
-                input=prompt_content,
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=300,
                 env=env
             )
-            # If --model flag isn't supported, try without model selection
+            # If --model not supported, retry with just -p
             if result.returncode != 0 and ("unknown option" in (result.stderr or "") or
                                             "unrecognized" in (result.stderr or "")):
-                log.warning(f"Copilot CLI doesn't support --model, retrying via stdin...")
+                log.warning("Copilot CLI --model not supported, retrying with -p only...")
+                cmd = [cli_path, "-p", prompt]
                 result = subprocess.run(
-                    [cli_path],
-                    input=prompt_content,
+                    cmd,
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -745,11 +723,9 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
             log.warning(f"stderr: {result.stderr[:500]}")
         return None
 
-    finally:
-        try:
-            os.unlink(prompt_file)
-        except OSError:
-            pass
+    except Exception as e:
+        log.warning(f"Copilot CLI error: {e}")
+        return None
 
 
 def call_github_models_api(prompt: str, env: dict) -> str:
@@ -757,9 +733,21 @@ def call_github_models_api(prompt: str, env: dict) -> str:
     Call the GitHub Models API for code review.
     Uses the GitHub Models inference endpoint (models.github.ai).
     """
-    # Use openai/gpt-5 via GitHub Models API (200K input, 100K output context)
+    # Use openai/gpt-5 via GitHub Models API
     model = "openai/gpt-5"
     log.info(f"Using GitHub Models API with model: {model}")
+
+    # GitHub Models API enforces per-request token limits.
+    # Truncate prompt to stay within limits (~3.5 chars per token).
+    max_input_tokens = 200000
+    max_prompt_chars = int(max_input_tokens * 3.5)
+    if len(prompt) > max_prompt_chars:
+        log.warning(f"Prompt is {len(prompt)} chars, truncating to ~{max_prompt_chars} chars")
+        prompt = prompt[:max_prompt_chars]
+        last_nl = prompt.rfind("\n")
+        if last_nl > max_prompt_chars * 0.8:
+            prompt = prompt[:last_nl]
+        prompt += "\n\n... [TRUNCATED due to API token limit] ..."
 
     payload = {
         "model": model,
