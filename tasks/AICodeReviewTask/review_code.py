@@ -757,111 +757,10 @@ def call_github_models_api(prompt: str, env: dict) -> str:
     Call the GitHub Models API for code review.
     Uses the GitHub Models inference endpoint (models.github.ai).
     """
-    # Supported GitHub Models API models (require publisher/ prefix)
-    # See: https://github.com/marketplace/models
-    supported_models = {
-        # Anthropic Claude
-        "anthropic/claude-4.5-sonnet",
-        "anthropic/claude-4.5-opus",
-        "anthropic/claude-4.5-haiku",
-        "anthropic/claude-4-opus",
-        "anthropic/claude-4-sonnet",
-        "anthropic/claude-3.7-sonnet",
-        "anthropic/claude-3.5-sonnet",
-        "anthropic/claude-3.5-haiku",
-        # OpenAI
-        "openai/gpt-5",
-        "openai/gpt-5-mini",
-        "openai/gpt-5-nano",
-        "openai/gpt-4o",
-        "openai/gpt-4o-mini",
-        "openai/gpt-4.1",
-        "openai/gpt-4.1-mini",
-        "openai/gpt-4.1-nano",
-        "openai/o3",
-        "openai/o3-mini",
-        "openai/codex-mini",
-        # Google
-        "google/gemini-2.5-pro",
-        "google/gemini-2.5-flash",
-        # Meta Llama
-        "meta/llama-4-maverick",
-        "meta/llama-4-scout",
-        "meta/llama-3.3-70b-instruct",
-        # DeepSeek
-        "deepseek/deepseek-r1",
-        "deepseek/deepseek-v3",
-        # Mistral
-        "azureml-mistral/Codestral-2501",
-    }
-
-    # Map user-friendly model names (from task.json) to GitHub Models IDs
-    model_aliases = {
-        "claude-sonnet-4.5": "anthropic/claude-4.5-sonnet",
-        "claude-opus-4.5": "anthropic/claude-4.5-opus",
-        "claude-haiku-4.5": "anthropic/claude-4.5-haiku",
-        "gpt-5": "openai/gpt-5",
-        "gpt-5.1": "openai/gpt-5",
-        "gpt-5.1-codex": "openai/codex-mini",
-        "gpt-4o": "openai/gpt-4o",
-        "gpt-4o-mini": "openai/gpt-4o-mini",
-        "gpt-4.1": "openai/gpt-4.1",
-        "gpt-4.1-mini": "openai/gpt-4.1-mini",
-        "gemini-3-pro": "google/gemini-2.5-pro",
-    }
-
-    # Model-specific token limits (input) for GitHub Models free tier
-    model_token_limits = {
-        "anthropic/claude-4.5-sonnet": 25000,
-        "anthropic/claude-4.5-opus": 25000,
-        "anthropic/claude-4.5-haiku": 25000,
-        "anthropic/claude-4-opus": 25000,
-        "anthropic/claude-4-sonnet": 25000,
-        "anthropic/claude-3.7-sonnet": 25000,
-        "anthropic/claude-3.5-sonnet": 25000,
-        "anthropic/claude-3.5-haiku": 25000,
-        "openai/gpt-4o": 8000,
-        "openai/gpt-4o-mini": 16000,
-        "openai/gpt-4.1": 16000,
-        "openai/gpt-4.1-mini": 16000,
-        "openai/gpt-5": 16000,
-        "openai/gpt-5-mini": 16000,
-        "openai/codex-mini": 16000,
-    }
-    default_token_limit = 8000
-
-    default_model = "anthropic/claude-4.5-sonnet"
-
-    # Resolve the model: check aliases first, then supported set, then default
-    requested_model = COPILOT_MODEL or ""
-    if requested_model in model_aliases:
-        model = model_aliases[requested_model]
-        log.info(f"Mapped model alias '{requested_model}' -> '{model}'")
-    elif requested_model in supported_models:
-        model = requested_model
-    elif requested_model:
-        log.warning(f"Unknown model '{requested_model}', falling back to {default_model}")
-        model = default_model
-    else:
-        model = default_model
-
+    # Use openai/gpt-5 via GitHub Models API (200K input, 100K output context)
+    model = "openai/gpt-5"
     log.info(f"Using GitHub Models API with model: {model}")
 
-    # Truncate prompt to stay within model's input token limit
-    # Rough estimate: 1 token ~ 4 characters
-    token_limit = model_token_limits.get(model, default_token_limit)
-    max_prompt_chars = int(token_limit * 3.5)  # conservative: 3.5 chars/token
-    if len(prompt) > max_prompt_chars:
-        log.warning(f"Prompt is {len(prompt)} chars, truncating to ~{max_prompt_chars} "
-                     f"chars for {model} ({token_limit} token limit)")
-        prompt = prompt[:max_prompt_chars]
-        # Cut at line boundary
-        last_nl = prompt.rfind("\n")
-        if last_nl > max_prompt_chars * 0.8:
-            prompt = prompt[:last_nl]
-        prompt += "\n\n... [PROMPT TRUNCATED due to API token limits] ..."
-
-    # Standard chat completions format (OpenAI-compatible)
     payload = {
         "model": model,
         "messages": [
@@ -875,10 +774,10 @@ def call_github_models_api(prompt: str, env: dict) -> str:
             }
         ],
         "temperature": 0.3,
-        "max_tokens": 8192
+        "max_tokens": 16384
     }
 
-    # GitHub Models API endpoint (new endpoint since July 2025)
+    # GitHub Models API endpoint
     api_url = "https://models.github.ai/inference/chat/completions"
     gh_token = env.get('GH_TOKEN', '')
 
@@ -888,8 +787,6 @@ def call_github_models_api(prompt: str, env: dict) -> str:
     headers = {
         "Authorization": f"Bearer {gh_token}",
         "Content-Type": "application/json",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
     }
 
     try:
