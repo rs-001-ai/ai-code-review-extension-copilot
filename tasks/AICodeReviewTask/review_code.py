@@ -1292,8 +1292,10 @@ def is_reviewable_file(path: str) -> bool:
 # Main Orchestration
 # ---------------------------------------------------------------------------
 
-def truncate_diff(diff: str, max_chars: int = 60000) -> str:
-    """Truncate diff to stay within model context limits."""
+def truncate_diff(diff: str, max_chars: int = 400000) -> str:
+    """Truncate diff to stay within model context limits.
+    Default 400K chars ≈ 115K tokens, leaving room for skill prompts within Claude's 200K context.
+    """
     if len(diff) <= max_chars:
         return diff
 
