@@ -3,7 +3,7 @@
   "id": "623fb557-2517-4331-aeea-e3d986bff9c5",
   "name": "AICodeReview",
   "friendlyName": "AI Code Review (GitHub Copilot)",
-  "description": "Automatically review Pull Requests using GitHub Copilot. Analyzes code for security, performance, and best practices.",
+  "description": "Automatically review Pull Requests using GitHub Copilot CLI with Claude Sonnet 4.5. Skill-based analysis with language/framework detection for security, performance, and best practices.",
   "helpMarkDown": "[Learn More](https://github.com/rs-001-ai/ai-code-review-extension-copilot)",
   "category": "Utility",
   "visibility": ["Build", "Release"],

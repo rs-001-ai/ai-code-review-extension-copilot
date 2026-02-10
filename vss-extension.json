@@ -4,7 +4,7 @@
   "publisher": "RachitSinghal",
   "version": "2.0.19",
   "name": "AI Code Review (GitHub Copilot)",
-  "description": "Automatically review Pull Requests using GitHub Copilot. Analyzes code for security vulnerabilities, performance issues, and best practices across 20+ languages.",
+  "description": "Automatically review Pull Requests using GitHub Copilot CLI with Claude Sonnet 4.5. Skill-based analysis detects languages and frameworks, reviews for security vulnerabilities (OWASP Top 10), performance issues, and best practices across 20+ languages. Supports Claude, GPT-5, and Gemini models.",
   "public": true,
   "galleryFlags": [
     "Public"
@@ -36,8 +36,12 @@
     "devops",
     "automation",
     "claude",
-    "gpt",
-    "copilot"
+    "claude sonnet",
+    "gpt-5",
+    "copilot",
+    "copilot cli",
+    "owasp",
+    "skill-based"
   ],
   "links": {
     "repository": {
