@@ -602,9 +602,14 @@ def build_review_prompt(diff: str) -> str:
         with open(PROMPT_FILE, "r", encoding="utf-8") as f:
             prompt = f.read()
     else:
-        # Use detailed review prompt
-        log.info("Using detailed review prompt")
-        prompt = DETAILED_REVIEW_PROMPT
+        # Use skill-based prompt (dynamically loads language/framework/security skills)
+        prompt = build_skill_based_prompt(diff)
+        if prompt.strip():
+            log.info("Using skill-based review prompt")
+        else:
+            # Fallback if skill files are missing
+            log.info("Skill files not found, using detailed review prompt")
+            prompt = DETAILED_REVIEW_PROMPT
 
     return f"{prompt}\n\n## Code Changes to Review:\n\n```diff\n{diff}\n```"
 
