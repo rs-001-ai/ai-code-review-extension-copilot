@@ -56,6 +56,7 @@ async function run(): Promise<void> {
       // GitHub auth (for Copilot CLI)
       GH_TOKEN: githubPat,
       GITHUB_TOKEN: githubPat,
+      COPILOT_GITHUB_TOKEN: githubPat,
     };
 
     // Set env vars

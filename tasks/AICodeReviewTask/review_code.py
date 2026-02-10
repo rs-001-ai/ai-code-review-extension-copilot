@@ -328,11 +328,29 @@ def install_copilot_cli() -> str:
 
     log.info("GitHub Copilot CLI not found. Installing...")
 
+    # Method 1: Install via npm (preferred - same package that works with env var auth)
+    npm_path = shutil.which("npm")
+    if npm_path:
+        log.info("Installing Copilot CLI via npm (@github/copilot)...")
+        try:
+            result = subprocess.run(
+                [npm_path, "install", "-g", "@github/copilot@latest"],
+                capture_output=True, text=True, check=True, timeout=120
+            )
+            log.info(f"npm install output: {result.stdout[:200]}")
+            installed = find_copilot_cli()
+            if installed:
+                log.info(f"Copilot CLI installed via npm at: {installed}")
+                return installed
+            log.warning("npm install succeeded but copilot not found in PATH")
+        except Exception as e:
+            log.warning(f"npm install of @github/copilot failed: {e}")
+
+    # Method 2: Platform-specific install (fallback)
     system = platform.system().lower()
 
     if system == "linux":
-        # Official Copilot CLI install script for Linux
-        log.info("Installing Copilot CLI on Linux...")
+        log.info("Installing Copilot CLI on Linux (fallback)...")
         try:
             # First ensure gh CLI is installed
             gh_path = shutil.which("gh")
@@ -642,6 +660,38 @@ Respond in this EXACT JSON format:
 - If code looks good, return empty arrays for issues and explain why in summary"""
 
 
+def ensure_gh_auth(env: dict):
+    """Ensure gh CLI is authenticated with the token for Copilot CLI auth."""
+    gh_path = shutil.which("gh")
+    if not gh_path:
+        log.debug("gh CLI not found, skipping gh auth setup")
+        return
+
+    try:
+        # Check if already authenticated
+        result = subprocess.run(
+            [gh_path, "auth", "status"],
+            capture_output=True, text=True, timeout=10, env=env
+        )
+        if result.returncode == 0:
+            log.info("gh CLI already authenticated")
+            return
+
+        # Login with token via stdin
+        log.info("Authenticating gh CLI with provided token...")
+        proc = subprocess.run(
+            [gh_path, "auth", "login", "--with-token"],
+            input=env.get("GH_TOKEN", ""),
+            capture_output=True, text=True, timeout=30, env=env
+        )
+        if proc.returncode == 0:
+            log.info("gh CLI authenticated successfully")
+        else:
+            log.warning(f"gh auth login failed: {proc.stderr[:300]}")
+    except Exception as e:
+        log.warning(f"gh auth setup failed: {e}")
+
+
 def run_copilot_review(diff: str, cli_command: str = None) -> str:
     """
     Send the diff to GitHub Copilot for review.
@@ -656,6 +706,13 @@ def run_copilot_review(diff: str, cli_command: str = None) -> str:
         "GITHUB_TOKEN": GITHUB_PAT,
         "COPILOT_GITHUB_TOKEN": GITHUB_PAT,
     }
+
+    # Debug: confirm auth env vars are set (masked)
+    token_preview = f"{GITHUB_PAT[:4]}...{GITHUB_PAT[-4:]}" if len(GITHUB_PAT) > 8 else "***"
+    log.info(f"Auth token configured: {token_preview} ({len(GITHUB_PAT)} chars)")
+
+    # Ensure gh CLI is authenticated (Copilot CLI may use gh auth)
+    ensure_gh_auth(env)
 
     # Try to install and use Copilot CLI (better models, larger context)
     try:
@@ -680,6 +737,21 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
         model = COPILOT_MODEL or "claude-sonnet-4.5"
         log.info(f"Running Copilot CLI with model: {model}")
 
+        # Debug: log CLI version
+        try:
+            ver = subprocess.run(
+                [cli_path, "--version"] if cli_path != "gh-copilot" else ["gh", "copilot", "--version"],
+                capture_output=True, text=True, timeout=10, env=env
+            )
+            log.info(f"Copilot CLI version: {ver.stdout.strip()}")
+        except Exception:
+            pass
+
+        # Debug: confirm auth env vars reach subprocess
+        log.info(f"Auth env vars set: GH_TOKEN={'yes' if env.get('GH_TOKEN') else 'NO'}, "
+                 f"GITHUB_TOKEN={'yes' if env.get('GITHUB_TOKEN') else 'NO'}, "
+                 f"COPILOT_GITHUB_TOKEN={'yes' if env.get('COPILOT_GITHUB_TOKEN') else 'NO'}")
+
         if cli_path == "gh-copilot":
             # Using gh copilot extension
             cmd = ["gh", "copilot", "explain", prompt]
@@ -695,7 +767,7 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
             # --allow-all-tools is required for non-interactive mode
             # Syntax: copilot --model <model> --allow-all-tools -p "prompt"
             cmd = [cli_path, "--model", model, "--allow-all-tools", "-p", prompt]
-            log.info(f"Copilot CLI command: {cli_path} --model {model} --allow-all-tools -p <prompt>")
+            log.info(f"Copilot CLI command: {cli_path} --model {model} --allow-all-tools -p <prompt ({len(prompt)} chars)>")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -722,9 +794,14 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
 
         log.warning(f"Copilot CLI returned code {result.returncode}")
         if result.stderr:
-            log.warning(f"stderr: {result.stderr[:500]}")
+            log.warning(f"Copilot CLI stderr: {result.stderr[:500]}")
+        if result.stdout:
+            log.warning(f"Copilot CLI stdout: {result.stdout[:500]}")
         return None
 
+    except subprocess.TimeoutExpired:
+        log.warning("Copilot CLI timed out after 300s")
+        return None
     except Exception as e:
         log.warning(f"Copilot CLI error: {e}")
         return None
