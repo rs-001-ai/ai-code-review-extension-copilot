@@ -661,33 +661,54 @@ Respond in this EXACT JSON format:
 
 
 def ensure_gh_auth(env: dict):
-    """Ensure gh CLI is authenticated with the token for Copilot CLI auth."""
+    """
+    Ensure gh CLI writes credentials to config file.
+    Copilot CLI reads from gh's config file (~/.config/gh/hosts.yml),
+    NOT from env vars. So we must force gh to write the token to disk.
+    """
     gh_path = shutil.which("gh")
     if not gh_path:
         log.debug("gh CLI not found, skipping gh auth setup")
         return
 
     try:
-        # Check if already authenticated
-        result = subprocess.run(
-            [gh_path, "auth", "status"],
-            capture_output=True, text=True, timeout=10, env=env
-        )
-        if result.returncode == 0:
-            log.info("gh CLI already authenticated")
-            return
+        # Remove GH_TOKEN/GITHUB_TOKEN from env so gh is FORCED to write
+        # to its config file instead of just using the env var in-memory
+        login_env = {k: v for k, v in env.items()
+                     if k not in ('GH_TOKEN', 'GITHUB_TOKEN', 'COPILOT_GITHUB_TOKEN')}
 
-        # Login with token via stdin
-        log.info("Authenticating gh CLI with provided token...")
+        log.info("Forcing gh auth login to write token to config file...")
         proc = subprocess.run(
             [gh_path, "auth", "login", "--with-token"],
             input=env.get("GH_TOKEN", ""),
-            capture_output=True, text=True, timeout=30, env=env
+            capture_output=True, text=True, timeout=30, env=login_env
         )
         if proc.returncode == 0:
-            log.info("gh CLI authenticated successfully")
+            log.info("gh auth login succeeded (token written to config)")
         else:
             log.warning(f"gh auth login failed: {proc.stderr[:300]}")
+
+        # Verify the config file was created
+        gh_config = os.path.expanduser("~/.config/gh/hosts.yml")
+        if os.path.isfile(gh_config):
+            log.info(f"gh config file exists at {gh_config}")
+        else:
+            log.warning(f"gh config file NOT found at {gh_config}")
+            # Try alternate location
+            for alt in ["~/.config/gh/hosts.yaml", "~/.gh/hosts.yml"]:
+                alt_path = os.path.expanduser(alt)
+                if os.path.isfile(alt_path):
+                    log.info(f"gh config found at alternate location: {alt_path}")
+                    break
+
+        # Verify auth status (without env vars, to confirm config-based auth)
+        status = subprocess.run(
+            [gh_path, "auth", "status"],
+            capture_output=True, text=True, timeout=10, env=login_env
+        )
+        log.info(f"gh auth status (no env): rc={status.returncode}, "
+                 f"out={status.stdout[:200]}, err={status.stderr[:200]}")
+
     except Exception as e:
         log.warning(f"gh auth setup failed: {e}")
 
@@ -747,10 +768,19 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
         except Exception:
             pass
 
-        # Debug: confirm auth env vars reach subprocess
-        log.info(f"Auth env vars set: GH_TOKEN={'yes' if env.get('GH_TOKEN') else 'NO'}, "
+        # Debug: confirm auth env vars reach subprocess (not just Python dict)
+        log.info(f"Auth env vars in dict: GH_TOKEN={'yes' if env.get('GH_TOKEN') else 'NO'}, "
                  f"GITHUB_TOKEN={'yes' if env.get('GITHUB_TOKEN') else 'NO'}, "
                  f"COPILOT_GITHUB_TOKEN={'yes' if env.get('COPILOT_GITHUB_TOKEN') else 'NO'}")
+        try:
+            diag = subprocess.run(
+                ["bash", "-c",
+                 'echo "GH=${#GH_TOKEN} GITHUB=${#GITHUB_TOKEN} COPILOT=${#COPILOT_GITHUB_TOKEN}"'],
+                capture_output=True, text=True, timeout=10, env=env
+            )
+            log.info(f"Auth env vars in subprocess: {diag.stdout.strip()}")
+        except Exception:
+            pass
 
         if cli_path == "gh-copilot":
             # Using gh copilot extension
