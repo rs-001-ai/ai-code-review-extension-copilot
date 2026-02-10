@@ -2,9 +2,9 @@
   "manifestVersion": 1,
   "id": "copilot-code-review-bot",
   "publisher": "RachitSinghal",
-  "version": "2.0.19",
+  "version": "2.0.20",
   "name": "AI Code Review (GitHub Copilot)",
-  "description": "Automatically review Pull Requests using GitHub Copilot CLI with Claude Sonnet 4.5. Skill-based analysis detects languages and frameworks, reviews for security vulnerabilities (OWASP Top 10), performance issues, and best practices across 20+ languages. Supports Claude, GPT-5, and Gemini models.",
+  "description": "Review PRs using GitHub Copilot CLI with Claude Sonnet 4.5. Skill-based security, performance, and best practice analysis across 20+ languages.",
   "public": true,
   "galleryFlags": [
     "Public"
