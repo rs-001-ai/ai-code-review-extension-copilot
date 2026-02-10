@@ -654,6 +654,7 @@ def run_copilot_review(diff: str, cli_command: str = None) -> str:
         **os.environ,
         "GH_TOKEN": GITHUB_PAT,
         "GITHUB_TOKEN": GITHUB_PAT,
+        "COPILOT_GITHUB_TOKEN": GITHUB_PAT,
     }
 
     # Try to install and use Copilot CLI (better models, larger context)
@@ -691,9 +692,10 @@ def run_copilot_cli(prompt: str, cli_path: str, env: dict) -> str:
             )
         else:
             # Standalone copilot CLI: use -p flag for non-interactive mode
-            # Syntax: copilot --model <model> -p "prompt"
-            cmd = [cli_path, "--model", model, "-p", prompt]
-            log.info(f"Copilot CLI command: {cli_path} --model {model} -p <prompt>")
+            # --allow-all-tools is required for non-interactive mode
+            # Syntax: copilot --model <model> --allow-all-tools -p "prompt"
+            cmd = [cli_path, "--model", model, "--allow-all-tools", "-p", prompt]
+            log.info(f"Copilot CLI command: {cli_path} --model {model} --allow-all-tools -p <prompt>")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -738,9 +740,10 @@ def call_github_models_api(prompt: str, env: dict) -> str:
     log.info(f"Using GitHub Models API with model: {model}")
 
     # GitHub Models API enforces per-request token limits.
-    # Truncate prompt to stay within limits (~3.5 chars per token).
-    max_input_tokens = 200000
-    max_prompt_chars = int(max_input_tokens * 3.5)
+    # GPT-5 limit: 4000 tokens input. Truncate prompt to fit.
+    # ~3.5 chars per token, reserve some for system message.
+    max_input_tokens = 4000
+    max_prompt_chars = int(max_input_tokens * 3.5) - 200
     if len(prompt) > max_prompt_chars:
         log.warning(f"Prompt is {len(prompt)} chars, truncating to ~{max_prompt_chars} chars")
         prompt = prompt[:max_prompt_chars]
@@ -761,8 +764,7 @@ def call_github_models_api(prompt: str, env: dict) -> str:
                 "content": prompt
             }
         ],
-        "temperature": 0.3,
-        "max_tokens": 16384
+        "max_completion_tokens": 4000
     }
 
     # GitHub Models API endpoint
