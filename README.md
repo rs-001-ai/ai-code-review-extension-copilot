@@ -77,6 +77,7 @@ In your pipeline settings, ensure **"Allow scripts to access the OAuth token"** 
 | `customPrompt` | No | - | Custom review instructions (overrides skill-based prompt) |
 | `promptFile` | No | - | Path to prompt file (.txt) |
 | `debug` | No | `false` | Enable verbose logging |
+| `repository` | No | Auto-detect | Repository name override for cross-repo build validation |
 | `continueOnError` | No | `true` | Don't fail pipeline on review error |
 
 ### Available Models
@@ -149,6 +150,78 @@ Create a `.copilot/review-prompt.txt` in your repo:
     githubPat: $(GitHubPAT)
     promptFile: '$(Build.SourcesDirectory)/.copilot/review-prompt.txt'
 ```
+
+## Cross-Repository Build Validation
+
+The extension supports **cross-repository build validation**, a common enterprise pattern where a single AI Code Review pipeline in a central repository is shared across multiple repositories via branch policies.
+
+### How It Works
+
+When a PR is created in **RepoB** but the pipeline is defined in **RepoA**, the extension automatically detects the cross-repo scenario by comparing `Build.Repository.Uri` (the pipeline's repo) with `System.PullRequest.SourceRepositoryURI` (the PR's repo). If they differ, it uses the PR's repository for all API calls.
+
+**No configuration needed** — cross-repo detection is automatic in most cases.
+
+### Setup: Central Pipeline for All Repos
+
+1. Create the review pipeline in your central DevOps repository (e.g., `DevOps`):
+
+```yaml
+# File: DevOps/azure-pipelines-review.yml
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- checkout: self
+  fetchDepth: 0
+
+- task: AICodeReview@2
+  inputs:
+    githubPat: $(GitHubPAT)
+    copilotModel: 'claude-sonnet-4.5'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+```
+
+2. In Azure DevOps, go to each target repository (e.g., `OnlineServiceTicketing`) > **Branch Policies** > **Build Validation**
+3. Add the pipeline from the central `DevOps` repo as a build validation policy
+
+The extension will automatically detect that the PR belongs to `OnlineServiceTicketing` and make API calls to the correct repository.
+
+### Explicit Repository Override
+
+If auto-detection does not work for your setup, you can explicitly set the `repository` input:
+
+```yaml
+- task: AICodeReview@2
+  inputs:
+    githubPat: $(GitHubPAT)
+    repository: $(System.PullRequest.SourceRepositoryURI)  # Extracts repo name from URI
+```
+
+You can also pass a plain repository name:
+
+```yaml
+- task: AICodeReview@2
+  inputs:
+    githubPat: $(GitHubPAT)
+    repository: 'OnlineServiceTicketing'
+```
+
+### Build Service Permissions for Cross-Repo
+
+When using cross-repo validation, the Build Service identity needs **"Contribute to pull requests"** permission on **each target repository** (not just the pipeline repo):
+
+1. Go to **Project Settings** > **Repos** > **Repositories** > target repo (e.g., `OnlineServiceTicketing`) > **Security**
+2. Find **"[Project] Build Service ([Org])"**
+3. Set **"Contribute to pull requests"** to **Allow**
 
 ## Supported Languages
 

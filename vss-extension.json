@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "copilot-code-review-bot",
   "publisher": "RachitSinghal",
-  "version": "2.0.20",
+  "version": "2.0.21",
   "name": "AI Code Review (GitHub Copilot)",
   "description": "Review PRs using GitHub Copilot CLI with Claude Sonnet 4.5. Skill-based security, performance, and best practice analysis across 20+ languages.",
   "public": true,

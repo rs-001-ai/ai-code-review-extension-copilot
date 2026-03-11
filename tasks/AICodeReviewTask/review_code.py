@@ -39,7 +39,10 @@ log = logging.getLogger("copilot-code-review")
 # Azure DevOps environment variables (set by the pipeline agent)
 SYSTEM_COLLECTIONURI = os.environ.get("SYSTEM_COLLECTIONURI", "")
 SYSTEM_TEAMPROJECT = os.environ.get("SYSTEM_TEAMPROJECT", "")
-BUILD_REPOSITORY_NAME = os.environ.get("BUILD_REPOSITORY_NAME", "")
+_BUILD_REPOSITORY_NAME = os.environ.get("BUILD_REPOSITORY_NAME", "")
+_REPOSITORY_OVERRIDE = os.environ.get("INPUT_REPOSITORY_OVERRIDE", "")
+# Cross-repo support: use override (from auto-detect or explicit input) if available
+BUILD_REPOSITORY_NAME = _REPOSITORY_OVERRIDE if _REPOSITORY_OVERRIDE else _BUILD_REPOSITORY_NAME
 SYSTEM_PULLREQUEST_PULLREQUESTID = os.environ.get("SYSTEM_PULLREQUEST_PULLREQUESTID", "")
 
 # Task inputs (set by task.json -> index.ts -> env vars)
@@ -1336,6 +1339,8 @@ def main():
     log.info(f"Organization: {SYSTEM_COLLECTIONURI}")
     log.info(f"Project: {SYSTEM_TEAMPROJECT}")
     log.info(f"Repository: {BUILD_REPOSITORY_NAME}")
+    if _REPOSITORY_OVERRIDE:
+        log.info(f"Cross-repo: pipeline repo is '{_BUILD_REPOSITORY_NAME}', PR repo is '{_REPOSITORY_OVERRIDE}'")
     log.info(f"PR ID: {SYSTEM_PULLREQUEST_PULLREQUESTID}")
     log.info(f"Model: {COPILOT_MODEL or 'default (gpt-4o)'}")
 

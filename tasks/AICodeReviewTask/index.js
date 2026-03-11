@@ -47,6 +47,28 @@ async function run() {
         const promptFile = tl.getInput("promptFile", false) || "";
         const debug = tl.getInput("debug", false) || "false";
         const continueOnError = tl.getInput("continueOnError", false) || "true";
+        const repositoryOverride = tl.getInput("repository", false) || "";
+        // Resolve the effective repository name for cross-repo build validation.
+        // Priority: explicit input > auto-detect from SourceRepositoryURI > BUILD_REPOSITORY_NAME
+        let effectiveRepository = "";
+        if (repositoryOverride) {
+            // If it looks like a URI (e.g., https://.../_git/RepoName), extract the repo name
+            const uriMatch = repositoryOverride.match(/\/_git\/(.+?)(?:\/|$)/);
+            effectiveRepository = uriMatch ? uriMatch[1] : repositoryOverride;
+            console.log(`Cross-repo: using explicit repository override: ${effectiveRepository}`);
+        }
+        else {
+            // Auto-detect: compare pipeline repo URI with PR source repo URI
+            const buildRepoUri = tl.getVariable("Build.Repository.Uri") || "";
+            const prSourceRepoUri = tl.getVariable("System.PullRequest.SourceRepositoryURI") || "";
+            if (prSourceRepoUri && buildRepoUri && prSourceRepoUri !== buildRepoUri) {
+                const uriMatch = prSourceRepoUri.match(/\/_git\/(.+?)(?:\/|$)/);
+                if (uriMatch) {
+                    effectiveRepository = uriMatch[1];
+                    console.log(`Cross-repo auto-detected: PR is in '${effectiveRepository}', pipeline is in '${tl.getVariable("Build.Repository.Name")}'`);
+                }
+            }
+        }
         // Get System.AccessToken
         const systemToken = tl.getVariable("System.AccessToken") || adoPat || "";
         if (!systemToken) {
@@ -73,6 +95,8 @@ async function run() {
             INPUT_PROMPT_FILE: promptFile,
             INPUT_DEBUG: debug,
             INPUT_CONTINUE_ON_ERROR: continueOnError,
+            // Cross-repo repository override
+            INPUT_REPOSITORY_OVERRIDE: effectiveRepository,
             // Azure DevOps system variables
             SYSTEM_ACCESSTOKEN: systemToken,
             // GitHub auth (for Copilot CLI)

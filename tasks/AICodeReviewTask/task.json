@@ -11,7 +11,7 @@
   "version": {
     "Major": 2,
     "Minor": 0,
-    "Patch": 20
+    "Patch": 21
   },
   "instanceNameFormat": "AI Code Review (Copilot)",
   "inputs": [
@@ -80,6 +80,13 @@
       "label": "Prompt File Path",
       "required": false,
       "helpMarkDown": "Path to a .txt file containing custom review instructions. Overridden by 'Custom Review Prompt' if both are set."
+    },
+    {
+      "name": "repository",
+      "type": "string",
+      "label": "Repository Name (Cross-Repo)",
+      "required": false,
+      "helpMarkDown": "Override repository name for cross-repository build validation. Leave empty for auto-detection. When the pipeline runs from a different repo than the PR, set this to $(System.PullRequest.SourceRepositoryURI) or the target repo name (e.g., 'MyRepo')."
     },
     {
       "name": "debug",
