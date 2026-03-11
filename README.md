@@ -30,7 +30,7 @@ Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.co
 1. Go to [GitHub Settings > Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)
 2. Set a name (e.g., "ADO Copilot Code Review") and expiration
 3. Under **Permissions**, enable:
-   - **Copilot Requests** — Read and Write (required for Copilot CLI)
+   - **Copilot Requests** — Read (required for Copilot CLI)
    - **Models** — Read (required for API fallback)
 4. Generate the token (it will start with `github_pat_`)
 5. Store as a secret variable `GitHubPAT` in your Azure DevOps pipeline
@@ -371,7 +371,7 @@ This is the most common error. It means the Copilot CLI cannot authenticate with
 
 **Fix**:
 1. Go to [GitHub Settings > Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)
-2. Create a new token with **Copilot Requests** (Read & Write) and **Models** (Read) permissions
+2. Create a new token with **Copilot Requests** (Read) and **Models** (Read) permissions
 3. Update the `GitHubPAT` pipeline variable with the new `github_pat_*` token
 
 ### "gh auth login failed: missing required scope 'repo'"
